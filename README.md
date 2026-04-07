@@ -15,19 +15,37 @@ Each round presents you with:
 
 Your mission: **figure out the hidden number** that completes the sentence and produces the given hash.
 
-> **Important:** Each question has a **different** answer. You cannot guess the same number twice! This forces you to actually understand and practice hash cracking.
+> **Important:** There are **104 unique challenges**, each with a **different** answer. You cannot guess the same number twice! This forces you to actually understand and practice hash cracking for every single question.
 
 ---
 
 ## Features
 
-- **20 unique challenge sentences** — each with a different hidden number
+- **104 unique challenge sentences** — each with a different hidden number ranging from small values (148, 314, 325) to large values (9100, 9137, 9223)
 - **4 hash algorithms** — MD5, SHA1, SHA256, SHA512 randomly selected per round
-- **Answers hidden in source code** — XOR-encrypted and scrambled so students can't cheat by reading the code
+- **Answers hidden in source code** — XOR-encrypted with a key and scrambled via a shuffled index map, so students cannot cheat by reading the code
+- **All 416 hashes verified accurate** — every sentence × every algorithm combination (104 × 4 = 416) was tested and confirmed correct
 - **HTTP-style status responses** — fuzzy server behavior adds realism (sometimes chaotic, sometimes accurate)
 - **Score tracking** — tracks how many hashes you've cracked
 - **Two versions** — CLI (terminal) and GUI (graphical window)
 - **Built-in hint system** — teaches students the brute-force technique
+
+---
+
+## Challenge Topics
+
+The 104 sentences span a wide range of cybersecurity and DevOps topics, including:
+
+| Category | Examples |
+|----------|---------|
+| **Web Security** | XSS payloads, SQL injection, CSRF tokens, JWT, CSP, CORS |
+| **Network Security** | Firewall, WAF, DNS, TCP, TLS, packet loss, latency |
+| **Offensive Security** | Zero-day exploits, brute force, privilege escalation, lateral movement |
+| **Defensive Security** | IDS, SIEM, SOAR, honeypots, incident response, threat hunting |
+| **Cloud & DevOps** | Docker, Kubernetes, CI/CD, S3, CDN, Lambda, Grafana |
+| **Cryptography** | Encryption keys, SSL certificates, cipher suites, RBAC |
+| **Compliance** | Audit controls, risk assessment, security training, patch management |
+| **General Operations** | Load balancers, Redis, Kafka, webhooks, rate limiting |
 
 ---
 
@@ -180,6 +198,8 @@ Once your script finds the number, enter it in the game!
 
 > **Real-world takeaway:** This is exactly how password cracking tools like Hashcat and John the Ripper work — they try millions of inputs until the hash matches. Now you understand the basics!
 
+> **Important:** Remember that answers range widely across the 104 challenges — some are as small as 148, others as large as 9223. Adjust your brute-force range accordingly!
+
 ---
 
 ## File Structure
@@ -188,7 +208,8 @@ Once your script finds the number, enter it in the game!
 hashgame/
 ├── hash_game_cli.py      # CLI (terminal) version of the game
 ├── hash_game_gui.py      # GUI (graphical) version of the game
-└── README.md             # This file
+├── README.md             # This file
+└── generate_data.py      # Data generator & hash verification script
 ```
 
 ---
@@ -207,7 +228,13 @@ Tkinter comes bundled with macOS Python installations. If missing, reinstall Pyt
 The CLI uses ANSI color codes. On older Windows versions, colors may not display correctly. Use the **GUI version** instead, or run in **Windows Terminal** which supports ANSI colors.
 
 ### Game feels too hard?
-Click the **HINT** button (GUI) or type `hint` (CLI) for a brute-force code example. Remember — the answers are all integers, so you just need to try numbers!
+Click the **HINT** button (GUI) or type `hint` (CLI) for a brute-force code example. Remember — the answers are all integers, so you just need to try numbers! Increase your brute-force range for harder challenges.
+
+### Want to verify the hashes yourself?
+Run the included generator script to verify all 416 hash computations:
+```bash
+python generate_data.py
+```
 
 ---
 
@@ -225,4 +252,4 @@ This project is free to use for educational purposes. Please give credit to **Cy
 
 ---
 
-*Learn hashing through play. Happy cracking!*
+*Learn hashing through play. 104 challenges await — happy cracking!*
