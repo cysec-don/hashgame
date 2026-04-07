@@ -1,41 +1,73 @@
 import hashlib
 import random
-import base64
 import os
 import sys
 
 # ═══════════════════════════════════════════════════════════════
 #   HASH CRACKER CHALLENGE - CLI Edition
-#   Designed by Cysec Don
+#   Designed by Cysec Don | cysecdon@gmail.com
 # ═══════════════════════════════════════════════════════════════
 
-# --- Hidden answer (encoded, not readable in source) ---
-_a = "NT" + "A" + "w"
-_b = "M" + "j" + "U" + "w"  # decoy variable
-correct_value = base64.b64decode(_a.encode()).decode()
+# --- XOR key for answer decoding ---
+_XK = 0x37
 
-# --- Sentence pool ---
+
+def _da(hx):
+    """Decode XOR'd hex answer back to integer."""
+    raw = bytes.fromhex(hx)
+    return int(''.join(chr(b ^ _XK) for b in raw))
+
+
+# --- Encoded answers (XOR'd, stored as hex fragments) ---
+# Index mapping: sentence[i] -> _ea[_im[i]]
+_ea = [
+    "06" + "0207",       # idx 0  -> 150
+    "05" + "070f0f",     # idx 1  -> 2048
+    "00",                # idx 2  -> 7
+    "0e" + "0e0e",       # idx 3  -> 999
+    "0f" + "05",         # idx 4  -> 42
+    "06" + "040400",     # idx 5  -> 1337
+    "04",                # idx 6  -> 3
+    "05" + "0201",       # idx 7  -> 256
+    "06" + "07050f",     # idx 8  -> 1024
+    "02" + "0707",       # idx 9  -> 500
+    "0f" + "0f",         # idx 10 -> 88
+    "0f" + "070f",       # idx 11 -> 404
+    "06" + "070707",     # idx 12 -> 1000
+    "02" + "0605",       # idx 13 -> 512
+    "00" + "00",         # idx 14 -> 77
+    "06" + "0f",         # idx 15 -> 14
+    "02",                # idx 16 -> 5
+    "04" + "06",         # idx 17 -> 31
+    "01" + "0e",         # idx 18 -> 69
+    "0e",                # idx 19 -> 9
+]
+
+# --- Scrambled index map: sentence[i] uses _ea[_im[i]] ---
+_im = [13, 3, 19, 7, 16, 9, 14, 1, 17, 11, 4, 6, 8, 15, 18, 2, 10, 0, 5, 12]
+
+# --- Sentence pool (each paired with a UNIQUE hidden answer) ---
 plain_sentences = [
-    "I just paid - naira for coffee.",
-    "The system crashed after receiving - requests.",
-    "My account was charged - times by mistake.",
-    "Error: you owe - dollars immediately.",
-    "Server responded with - errors today.",
-    "The hacker sent - packets to the target.",
-    "Login failed after - attempts.",
-    "Firewall blocked - connections.",
-    "Database returned - results.",
-    "User made - requests per second.",
-    "System logged - warnings.",
-    "API returned - responses.",
-    "Bot generated - inputs.",
-    "Process consumed - MB memory.",
-    "Script executed - times.",
-    "Scanner found - vulnerabilities.",
-    "Admin reset password - times.",
-    "Malware triggered - alerts.",
-    "IDS detected - anomalies.",
-    "Backup failed after - tries."
+    "I just paid - naira for coffee.",            # 150
+    "The system crashed after receiving - requests.",  # 2048
+    "My account was charged - times by mistake.",  # 7
+    "Error: you owe - dollars immediately.",       # 999
+    "Server responded with - errors today.",       # 42
+    "The hacker sent - packets to the target.",    # 1337
+    "Login failed after - attempts.",              # 3
+    "Firewall blocked - connections.",             # 256
+    "Database returned - results.",                # 1024
+    "User made - requests per second.",            # 500
+    "System logged - warnings.",                   # 88
+    "API returned - responses.",                   # 404
+    "Bot generated - inputs.",                     # 1000
+    "Process consumed - MB memory.",               # 512
+    "Script executed - times.",                    # 77
+    "Scanner found - vulnerabilities.",            # 14
+    "Admin reset password - times.",               # 5
+    "Malware triggered - alerts.",                 # 31
+    "IDS detected - anomalies.",                   # 69
+    "Backup failed after - tries.",                # 9
 ]
 
 # --- Hash algorithms ---
@@ -58,6 +90,26 @@ status_codes = {
     "503": "503 Service Unavailable"
 }
 
+# --- ANSI color codes ---
+class C:
+    RST = "\033[0m"
+    BLD = "\033[1m"
+    DIM = "\033[2m"
+    RED = "\033[91m"
+    GRN = "\033[92m"
+    YLW = "\033[93m"
+    BLU = "\033[94m"
+    MGN = "\033[95m"
+    CYN = "\033[96m"
+    WHT = "\033[97m"
+    BGBLK = "\033[40m"
+    BGRED = "\033[41m"
+    BGGRN = "\033[42m"
+    BGYLW = "\033[43m"
+    BGBLU = "\033[44m"
+    BGMGN = "\033[45m"
+    BGCYN = "\033[46m"
+
 score = 0
 total_rounds = 0
 
@@ -68,18 +120,31 @@ def clear_screen():
 
 def show_banner():
     print()
-    print("=" * 60)
-    print("     HASH CRACKER CHALLENGE - CLI Edition")
-    print("     Designed by Cysec Don")
-    print("=" * 60)
+    print(f"""{C.BGBLU}{C.WHT}{C.BLD}{'─' * 62}{C.RST}""")
+    print(f"{C.BGBLU}{C.WHT}{C.BLD}  ██╗  ██╗ █████╗  ██████╗██╗  ██╗███████╗██████╗     {C.RST}")
+    print(f"{C.BGBLU}{C.WHT}{C.BLD}  ██║ ██╔╝██╔══██╗██╔════╝██║ ██╔╝██╔════╝██╔══██╗    {C.RST}")
+    print(f"{C.BGBLU}{C.WHT}{C.BLD}  █████╔╝ ███████║██║     █████╔╝ █████╗  ██║  ██║    {C.RST}")
+    print(f"{C.BGBLU}{C.WHT}{C.BLD}  ██╔═██╗ ██╔══██║██║     ██╔═██╗ ██╔══╝  ██║  ██║    {C.RST}")
+    print(f"{C.BGBLU}{C.WHT}{C.BLD}  ██║  ██╗██║  ██║╚██████╗██║  ██╗███████╗██████╔╝    {C.RST}")
+    print(f"{C.BGBLU}{C.WHT}{C.BLD}  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═════╝     {C.RST}")
+    print(f"{C.BGBLU}{C.WHT}{C.BLD}{'─' * 62}{C.RST}")
     print()
-    print("  OBJECTIVE: Crack the hash! Find the number that")
-    print("  completes the sentence and matches the given hash.")
+    print(f"  {C.BGMGN}{C.WHT}{C.BLD}  █▀▀█ █▀▀█ █▀▀▄ █▀▀█   █▀▀█ █  █ █▀▀▄ █▀▀  {C.RST}")
+    print(f"  {C.BGMGN}{C.WHT}{C.BLD}  █  █ █  █ █  █ █▄▄▀   █▄▄█ █  █ █  █ █   {C.RST}")
+    print(f"  {C.BGMGN}{C.WHT}{C.BLD}  █▄▄█ ▀▀▀▀ ▀  ▀ ▀ ▀▀   █  █ ▀▀▀▀ ▀  ▀ ▀▀▀  {C.RST}")
+    print(f"  {C.BGMGN}{C.WHT}{C.BLD}{'─' * 62}{C.RST}")
     print()
-    print("  TIP: Use Python's hashlib to brute-force the answer.")
-    print("  Example: hashlib.md5(b'I just paid 100 naira for coffee.').hexdigest()")
+    print(f"  {C.GRN}{C.BLD}Designed & Created by:{C.RST} {C.YLW}{C.BLD}Cysec Don{C.RST}")
+    print(f"  {C.GRN}{C.BLD}Contact:{C.RST} {C.CYN}{C.BLD}cysecdon@gmail.com{C.RST}")
     print()
-    print("=" * 60)
+    print(f"  {C.CYN}{'─' * 62}{C.RST}")
+    print(f"  {C.WHT} OBJECTIVE:{C.RST} {C.DIM}Crack the hash! Find the unique number{C.RST}")
+    print(f"  {C.DIM}  that completes each sentence and produces the hash.{C.RST}")
+    print()
+    print(f"  {C.WHT} TIP:{C.RST} {C.DIM}Each question has a DIFFERENT answer!{C.RST}")
+    print(f"  {C.DIM}  Use Python's hashlib to brute-force each one.{C.RST}")
+    print(f"  {C.DIM}  Example: hashlib.md5(b'Sentence with number').hexdigest(){C.RST}")
+    print(f"  {C.CYN}{'─' * 62}{C.RST}")
 
 
 def hash_sentence(sentence, algo):
@@ -87,61 +152,68 @@ def hash_sentence(sentence, algo):
 
 
 def generate_round():
-    sentence = random.choice(plain_sentences)
+    idx = random.randint(0, len(plain_sentences) - 1)
+    sentence = plain_sentences[idx]
     algo = random.choice(list(hash_functions.keys()))
-    filled = sentence.replace("-", correct_value)
+    correct_ans = _da(_ea[_im[idx]])
+    filled = sentence.replace("-", str(correct_ans))
     h = hash_sentence(filled, algo)
-    return sentence, algo, h
+    return sentence, algo, h, correct_ans
 
 
 def display_round(sentence, algo, h):
-    masked = sentence.replace("-", "_____")
+    masked = sentence.replace("-", f"{C.RED}{C.BLD}_____{C.RST}")
     print()
-    print(f"  Hash Type  : {algo}")
-    print(f"  Hash Value : {h}")
+    print(f"  {C.CYN}{C.BLD}Hash Type  :{C.RST} {C.WHT}{algo}{C.RST}")
+    print(f"  {C.CYN}{C.BLD}Hash Value :{C.RST} {C.YLW}{h}{C.RST}")
     print()
-    print(f"  Sentence   : {masked}")
+    print(f"  {C.GRN}{C.BLD}Sentence   :{C.RST} {C.WHT}{C.BLD}{masked}{C.RST}")
     print()
 
 
-def check_answer(user_input):
+def check_answer(user_input, correct_ans):
     global score, total_rounds
     total_rounds += 1
 
-    # The game uses a fuzzy check - sometimes accurate, sometimes chaotic
     mode = random.choice(["check", "check", "ignore", "chaos"])
 
     if mode == "check":
-        if user_input == correct_value:
+        if user_input == str(correct_ans):
             score += 1
-            print(f"\n  >> 200 OK - CORRECT! The hash matches!")
-            print(f"     Answer: {correct_value}")
-            print(f"     Score: {score}/{total_rounds}")
+            print(f"\n  {C.GRN}{C.BLD}>> 200 OK - CORRECT!{C.RST} The hash matches!")
+            print(f"  {C.GRN}   Answer: {correct_ans}{C.RST}")
+            print(f"  {C.BLD}   Score: {score}/{total_rounds}{C.RST}")
         else:
-            print(f"\n  >> 400 Bad Request - WRONG! The hash does not match.")
-            print(f"     Your input: '{user_input}' did not produce the target hash.")
-            print(f"     Try hashing different numbers to find the match!")
-            print(f"     Score: {score}/{total_rounds}")
+            print(f"\n  {C.RED}{C.BLD}>> 400 Bad Request - WRONG!{C.RST} Hash does not match.")
+            print(f"  {C.RED}   Your input '{user_input}' did not produce the target hash.{C.RST}")
+            print(f"  {C.YLW}   Try hashing different numbers!{C.RST}")
+            print(f"  {C.BLD}   Score: {score}/{total_rounds}{C.RST}")
 
     elif mode == "ignore":
         code = random.choice(list(status_codes.values()))
-        print(f"\n  >> {code}")
-        print(f"     (Server gave an ambiguous response - the hash doesn't lie!)")
-        print(f"     Score: {score}/{total_rounds}")
+        print(f"\n  {C.YLW}{C.BLD}>> {code}{C.RST}")
+        print(f"  {C.DIM}   (Ambiguous server response - the hash doesn't lie!){C.RST}")
+        print(f"  {C.BLD}   Score: {score}/{total_rounds}{C.RST}")
 
-    else:  # chaos
+    else:
         code = random.choice(list(status_codes.values()))
         noise = user_input * random.randint(1, 3)
-        print(f"\n  >> {code} | Payload: {noise}")
-        print(f"     (Network chaos detected - focus on the hash!)")
-        print(f"     Score: {score}/{total_rounds}")
+        print(f"\n  {C.MGN}{C.BLD}>> {code} | Payload: {noise}{C.RST}")
+        print(f"  {C.DIM}   (Network chaos detected - focus on the hash!){C.RST}")
+        print(f"  {C.BLD}   Score: {score}/{total_rounds}{C.RST}")
 
 
 def show_hint():
     print()
-    print("  HINT: The answer is an integer. Try writing a Python script")
-    print("  that hashes the sentence with different numbers until the")
-    print("  hash matches the target. That's how real hash cracking works!")
+    print(f"  {C.YLW}{C.BLD}HINT:{C.RST}")
+    print(f"  {C.WHT}  Each question has a UNIQUE number answer.{C.RST}")
+    print(f"  {C.WHT}  Write a Python script to brute-force it:{C.RST}")
+    print()
+    print(f"  {C.CYN}  import hashlib{C.RST}")
+    print(f"  {C.CYN}  for i in range(1, 10000):{C.RST}")
+    print(f"  {C.CYN}      text = f'I just paid {{i}} naira for coffee.'{C.RST}")
+    print(f"  {C.CYN}      h = hashlib.md5(text.encode()).hexdigest(){C.RST}")
+    print(f"  {C.CYN}      if h == TARGET_HASH: print(f'Found: {{i}}'){C.RST}")
     print()
 
 
@@ -150,27 +222,28 @@ def main():
     show_banner()
 
     while True:
-        sentence, algo, h = generate_round()
+        sentence, algo, h, correct_ans = generate_round()
         display_round(sentence, algo, h)
 
-        print("  Commands: type a number to guess | 'hint' for help | 'quit' to exit")
+        print(f"  {C.DIM}Commands: number to guess | 'hint' | 'quit'{C.RST}")
         print()
-        user_input = input("  Your guess: ").strip()
+        user_input = input(f"  {C.GRN}{C.BLD}Your guess:{C.RST} ").strip()
 
         if user_input.lower() in ('quit', 'exit', 'q'):
             clear_screen()
+            show_banner()
             print()
-            print("=" * 60)
-            print(f"  FINAL SCORE: {score}/{total_rounds}")
-            print("  Thanks for playing!")
-            print("  Designed by Cysec Don")
-            print("=" * 60)
+            print(f"  {C.BGBLK}{C.GRN}{C.BLD}{'─' * 58}{C.RST}")
+            print(f"  {C.BGBLK}{C.GRN}{C.BLD}  FINAL SCORE: {score}/{total_rounds}{C.RST}")
+            print(f"  {C.BGBLK}{C.GRN}{C.BLD}  Thanks for playing!{C.RST}")
+            print(f"  {C.BGBLK}{C.YLW}{C.BLD}  Designed by Cysec Don | cysecdon@gmail.com{C.RST}")
+            print(f"  {C.BGBLK}{C.GRN}{C.BLD}{'─' * 58}{C.RST}")
             print()
             break
 
         if user_input.lower() == 'hint':
             show_hint()
-            input("  Press Enter to continue...")
+            input(f"\n  {C.DIM}Press Enter to continue...{C.RST} ")
             clear_screen()
             show_banner()
             continue
@@ -178,8 +251,8 @@ def main():
         if user_input.lower() == 'new':
             continue
 
-        check_answer(user_input)
-        input("\n  Press Enter for next round...")
+        check_answer(user_input, correct_ans)
+        input(f"\n  {C.DIM}Press Enter for next round...{C.RST} ")
         clear_screen()
         show_banner()
 
@@ -188,6 +261,6 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n  Game interrupted. Goodbye!")
-        print("  Designed by Cysec Don\n")
+        print(f"\n\n  {C.YLW}Game interrupted. Goodbye!{C.RST}")
+        print(f"  {C.GRN}Designed by Cysec Don | cysecdon@gmail.com{C.RST}\n")
         sys.exit(0)

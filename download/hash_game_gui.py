@@ -2,39 +2,72 @@ import tkinter as tk
 from tkinter import font as tkfont
 import hashlib
 import random
-import base64
 
 # ═══════════════════════════════════════════════════════════════
 #   HASH CRACKER CHALLENGE - GUI Edition
-#   Designed by Cysec Don
+#   Designed by Cysec Don | cysecdon@gmail.com
 # ═══════════════════════════════════════════════════════════════
 
-# --- Hidden answer (encoded, not readable in source) ---
-_a = "NT" + "A" + "w"
-correct_value = base64.b64decode(_a.encode()).decode()
+# --- XOR key for answer decoding ---
+_XK = 0x37
 
-# --- Sentence pool ---
+
+def _da(hx):
+    """Decode XOR'd hex answer back to integer."""
+    raw = bytes.fromhex(hx)
+    return int(''.join(chr(b ^ _XK) for b in raw))
+
+
+# --- Encoded answers (XOR'd, stored as hex fragments) ---
+# Index mapping: sentence[i] -> _ea[_im[i]]
+_ea = [
+    "06" + "0207",       # idx 0  -> 150
+    "05" + "070f0f",     # idx 1  -> 2048
+    "00",                # idx 2  -> 7
+    "0e" + "0e0e",       # idx 3  -> 999
+    "0f" + "05",         # idx 4  -> 42
+    "06" + "040400",     # idx 5  -> 1337
+    "04",                # idx 6  -> 3
+    "05" + "0201",       # idx 7  -> 256
+    "06" + "07050f",     # idx 8  -> 1024
+    "02" + "0707",       # idx 9  -> 500
+    "0f" + "0f",         # idx 10 -> 88
+    "0f" + "070f",       # idx 11 -> 404
+    "06" + "070707",     # idx 12 -> 1000
+    "02" + "0605",       # idx 13 -> 512
+    "00" + "00",         # idx 14 -> 77
+    "06" + "0f",         # idx 15 -> 14
+    "02",                # idx 16 -> 5
+    "04" + "06",         # idx 17 -> 31
+    "01" + "0e",         # idx 18 -> 69
+    "0e",                # idx 19 -> 9
+]
+
+# --- Scrambled index map: sentence[i] uses _ea[_im[i]] ---
+_im = [13, 3, 19, 7, 16, 9, 14, 1, 17, 11, 4, 6, 8, 15, 18, 2, 10, 0, 5, 12]
+
+# --- Sentence pool (each paired with a UNIQUE hidden answer) ---
 plain_sentences = [
-    "I just paid - naira for coffee.",
-    "The system crashed after receiving - requests.",
-    "My account was charged - times by mistake.",
-    "Error: you owe - dollars immediately.",
-    "Server responded with - errors today.",
-    "The hacker sent - packets to the target.",
-    "Login failed after - attempts.",
-    "Firewall blocked - connections.",
-    "Database returned - results.",
-    "User made - requests per second.",
-    "System logged - warnings.",
-    "API returned - responses.",
-    "Bot generated - inputs.",
-    "Process consumed - MB memory.",
-    "Script executed - times.",
-    "Scanner found - vulnerabilities.",
-    "Admin reset password - times.",
-    "Malware triggered - alerts.",
-    "IDS detected - anomalies.",
-    "Backup failed after - tries."
+    "I just paid - naira for coffee.",            # 150
+    "The system crashed after receiving - requests.",  # 2048
+    "My account was charged - times by mistake.",  # 7
+    "Error: you owe - dollars immediately.",       # 999
+    "Server responded with - errors today.",       # 42
+    "The hacker sent - packets to the target.",    # 1337
+    "Login failed after - attempts.",              # 3
+    "Firewall blocked - connections.",             # 256
+    "Database returned - results.",                # 1024
+    "User made - requests per second.",            # 500
+    "System logged - warnings.",                   # 88
+    "API returned - responses.",                   # 404
+    "Bot generated - inputs.",                     # 1000
+    "Process consumed - MB memory.",               # 512
+    "Script executed - times.",                    # 77
+    "Scanner found - vulnerabilities.",            # 14
+    "Admin reset password - times.",               # 5
+    "Malware triggered - alerts.",                 # 31
+    "IDS detected - anomalies.",                   # 69
+    "Backup failed after - tries.",                # 9
 ]
 
 # --- Hash algorithms ---
@@ -62,6 +95,7 @@ total_rounds = 0
 current_algo = ""
 current_hash = ""
 current_sentence = ""
+current_correct = 0
 
 
 def hash_sentence(sentence, algo):
@@ -69,11 +103,14 @@ def hash_sentence(sentence, algo):
 
 
 def new_round():
-    global current_algo, current_hash, current_sentence, score, total_rounds
+    global current_algo, current_hash, current_sentence, current_correct
 
-    current_sentence = random.choice(plain_sentences)
+    idx = random.randint(0, len(plain_sentences) - 1)
+    current_sentence = plain_sentences[idx]
     current_algo = random.choice(list(hash_functions.keys()))
-    filled = current_sentence.replace("-", correct_value)
+    current_correct = _da(_ea[_im[idx]])
+
+    filled = current_sentence.replace("-", str(current_correct))
     current_hash = hash_sentence(filled, current_algo)
 
     masked = current_sentence.replace("-", "_____")
@@ -98,10 +135,10 @@ def check():
     mode = random.choice(["check", "check", "ignore", "chaos"])
 
     if mode == "check":
-        if user == correct_value:
+        if user == str(current_correct):
             score += 1
             result_label.config(
-                text="200 OK - CORRECT! Hash matched!",
+                text=f"200 OK - CORRECT! Answer: {current_correct}",
                 fg="#00ff88"
             )
         else:
@@ -131,7 +168,7 @@ def check():
 def show_hint():
     hint_window = tk.Toplevel(root)
     hint_window.title("Hint - Hash Cracker Challenge")
-    hint_window.geometry("450x220")
+    hint_window.geometry("480x280")
     hint_window.configure(bg="#1a1a2e")
     hint_window.resizable(False, False)
 
@@ -143,13 +180,17 @@ def show_hint():
     ).pack(pady=(15, 10))
 
     hint_text = (
-        "The answer is an integer.\n\n"
+        "Each question has a UNIQUE number answer!\n\n"
         "Write a Python script that hashes the sentence\n"
         "with different numbers and compares the result\n"
         "to the target hash.\n\n"
         "Example:\n"
-        "hashlib.md5(b'I just paid 100 naira for coffee.')\n"
-        "    .hexdigest()"
+        "import hashlib\n"
+        "for i in range(1, 10000):\n"
+        "    h = hashlib.md5(\n"
+        "        f'I just paid {i} naira for coffee.'.encode()\n"
+        "    ).hexdigest()\n"
+        "    if h == TARGET: print(f'Found: {i}')"
     )
     tk.Label(
         hint_window,
@@ -160,13 +201,49 @@ def show_hint():
     ).pack(pady=(0, 15))
 
 
+def show_credits():
+    cred_window = tk.Toplevel(root)
+    cred_window.title("Credits - Hash Cracker Challenge")
+    cred_window.geometry("400x180")
+    cred_window.configure(bg="#1a1a2e")
+    cred_window.resizable(False, False)
+
+    tk.Label(
+        cred_window,
+        text="CREDITS",
+        font=("Consolas", 16, "bold"),
+        fg="#00ff88", bg="#1a1a2e"
+    ).pack(pady=(15, 10))
+
+    tk.Label(
+        cred_window,
+        text="Designed & Created by:",
+        font=("Consolas", 10),
+        fg="#888888", bg="#1a1a2e"
+    ).pack(pady=(5, 2))
+
+    tk.Label(
+        cred_window,
+        text="Cysec Don",
+        font=("Consolas", 14, "bold"),
+        fg="#00ccff", bg="#1a1a2e"
+    ).pack(pady=(0, 5))
+
+    tk.Label(
+        cred_window,
+        text="cysecdon@gmail.com",
+        font=("Consolas", 10),
+        fg="#ffaa00", bg="#1a1a2e"
+    ).pack(pady=(0, 10))
+
+
 # ═══════════════════════════════════════════════════════════════
 #   GUI SETUP
 # ═══════════════════════════════════════════════════════════════
 
 root = tk.Tk()
 root.title("Hash Cracker Challenge - Designed by Cysec Don")
-root.geometry("700x520")
+root.geometry("700x560")
 root.configure(bg="#0f0f23")
 root.resizable(False, False)
 
@@ -182,8 +259,14 @@ tk.Label(
 tk.Label(
     title_frame,
     text="Designed by Cysec Don",
+    font=("Consolas", 10, "bold"),
+    fg="#00ccff", bg="#16213e"
+).pack(pady=(0, 1))
+tk.Label(
+    title_frame,
+    text="cysecdon@gmail.com",
     font=("Consolas", 9),
-    fg="#888888", bg="#16213e"
+    fg="#ffaa00", bg="#16213e"
 ).pack(pady=(0, 10))
 
 # --- Score ---
@@ -286,13 +369,30 @@ tk.Button(
     command=show_hint
 ).pack(side="left", padx=6)
 
+tk.Button(
+    btn_frame, text="CREDITS",
+    font=("Consolas", 10, "bold"),
+    bg="#16213e", fg="#ff44ff",
+    activebackground="#1a3a5c",
+    bd=0, padx=12, pady=4,
+    command=show_credits
+).pack(side="left", padx=6)
+
 # --- Footer ---
+footer_frame = tk.Frame(root, bg="#0f0f23")
+footer_frame.pack(side="bottom", pady=8)
 tk.Label(
-    root,
-    text="Designed by Cysec Don | Learn Hashing Through Play",
+    footer_frame,
+    text="Designed by Cysec Don",
     font=("Consolas", 8),
     fg="#555555", bg="#0f0f23"
-).pack(side="bottom", pady=8)
+).pack()
+tk.Label(
+    footer_frame,
+    text="cysecdon@gmail.com | Learn Hashing Through Play",
+    font=("Consolas", 8),
+    fg="#555555", bg="#0f0f23"
+).pack()
 
 # --- Start first round ---
 new_round()
