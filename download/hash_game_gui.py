@@ -1,399 +1,634 @@
+#!/usr/bin/env python3
+"""
+HashGame GUI - Educational Hash Brute-Force Trainer
+Credits: Cysec Don - cysecdon@gmail.com
+"""
 import tkinter as tk
-from tkinter import font as tkfont
+from tkinter import messagebox, scrolledtext
+import json
+
+
+# ================================================================
+# HASH FUNCTION IMPLEMENTATIONS (all 50 types)
+# ================================================================
 import hashlib
-import random
+import zlib
+import struct
 
-# ═══════════════════════════════════════════════════════════════
-#   HASH CRACKER CHALLENGE - GUI Edition
-#   Designed by Cysec Don | cysecdon@gmail.com
-# ═══════════════════════════════════════════════════════════════
+def hash_crc16(data: bytes) -> bytes:
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    return struct.pack('<H', crc)
 
-# --- XOR key for answer decoding ---
-_XK = 0x37
+def hash_adler32(data: bytes) -> bytes:
+    return struct.pack('>I', zlib.adler32(data) & 0xFFFFFFFF)
 
+def hash_crc32(data: bytes) -> bytes:
+    return struct.pack('>I', zlib.crc32(data) & 0xFFFFFFFF)
 
-def _da(hx):
-    """Decode XOR'd hex answer back to integer."""
-    raw = bytes.fromhex(hx)
-    return int(''.join(chr(b ^ _XK) for b in raw))
+def hash_fnv1_32(data: bytes) -> bytes:
+    h = 0x811c9dc5
+    for b in data:
+        h = (h * 0x01000193) & 0xFFFFFFFF
+        h ^= b
+    return struct.pack('<I', h)
 
+def hash_jenkins(data: bytes) -> bytes:
+    h = 0
+    for b in data:
+        h = (h + b) & 0xFFFFFFFF
+        h = (h + (h << 10)) & 0xFFFFFFFF
+        h ^= (h >> 6)
+    h = (h + (h << 3)) & 0xFFFFFFFF
+    h ^= (h >> 11)
+    h = (h + (h << 15)) & 0xFFFFFFFF
+    return struct.pack('<I', h)
 
-# --- Encoded answers (XOR'd, stored as hex fragments) ---
-# Index mapping: sentence[i] -> _ea[_im[i]]
-_ea = [
-    "06" + "0207",       # idx 0  -> 150
-    "05" + "070f0f",     # idx 1  -> 2048
-    "00",                # idx 2  -> 7
-    "0e" + "0e0e",       # idx 3  -> 999
-    "0f" + "05",         # idx 4  -> 42
-    "06" + "040400",     # idx 5  -> 1337
-    "04",                # idx 6  -> 3
-    "05" + "0201",       # idx 7  -> 256
-    "06" + "07050f",     # idx 8  -> 1024
-    "02" + "0707",       # idx 9  -> 500
-    "0f" + "0f",         # idx 10 -> 88
-    "0f" + "070f",       # idx 11 -> 404
-    "06" + "070707",     # idx 12 -> 1000
-    "02" + "0605",       # idx 13 -> 512
-    "00" + "00",         # idx 14 -> 77
-    "06" + "0f",         # idx 15 -> 14
-    "02",                # idx 16 -> 5
-    "04" + "06",         # idx 17 -> 31
-    "01" + "0e",         # idx 18 -> 69
-    "0e",                # idx 19 -> 9
-]
+def hash_ntlm(data: bytes) -> bytes:
+    from Crypto.Hash import MD4 as CryptoMD4
+    h = CryptoMD4.new()
+    h.update(data.decode('utf-8', errors='replace').encode('utf-16-le'))
+    return h.digest()
 
-# --- Scrambled index map: sentence[i] uses _ea[_im[i]] ---
-_im = [13, 3, 19, 7, 16, 9, 14, 1, 17, 11, 4, 6, 8, 15, 18, 2, 10, 0, 5, 12]
+def hash_md4(data: bytes) -> bytes:
+    from Crypto.Hash import MD4 as CryptoMD4
+    return CryptoMD4.new(data).digest()
 
-# --- Sentence pool (each paired with a UNIQUE hidden answer) ---
-plain_sentences = [
-    "I just paid - naira for coffee.",            # 150
-    "The system crashed after receiving - requests.",  # 2048
-    "My account was charged - times by mistake.",  # 7
-    "Error: you owe - dollars immediately.",       # 999
-    "Server responded with - errors today.",       # 42
-    "The hacker sent - packets to the target.",    # 1337
-    "Login failed after - attempts.",              # 3
-    "Firewall blocked - connections.",             # 256
-    "Database returned - results.",                # 1024
-    "User made - requests per second.",            # 500
-    "System logged - warnings.",                   # 88
-    "API returned - responses.",                   # 404
-    "Bot generated - inputs.",                     # 1000
-    "Process consumed - MB memory.",               # 512
-    "Script executed - times.",                    # 77
-    "Scanner found - vulnerabilities.",            # 14
-    "Admin reset password - times.",               # 5
-    "Malware triggered - alerts.",                 # 31
-    "IDS detected - anomalies.",                   # 69
-    "Backup failed after - tries.",                # 9
-]
+def hash_md5(data: bytes) -> bytes:
+    return hashlib.md5(data).digest()
 
-# --- Hash algorithms ---
-hash_functions = {
-    "MD5": hashlib.md5,
-    "SHA1": hashlib.sha1,
-    "SHA256": hashlib.sha256,
-    "SHA512": hashlib.sha512
+def _sha0_impl(message: bytes) -> bytes:
+    def left_rotate(n, b):
+        return ((n << b) | (n >> (32 - b))) & 0xFFFFFFFF
+    H0, H1, H2, H3, H4 = 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0
+    orig_len = len(message)
+    message += b'\x80'
+    while len(message) % 64 != 56:
+        message += b'\x00'
+    message += struct.pack('>Q', orig_len * 8)
+    for i in range(0, len(message), 64):
+        chunk = message[i:i+64]
+        W = list(struct.unpack('>16I', chunk))
+        for j in range(16, 80):
+            W.append(W[j-3] ^ W[j-8] ^ W[j-14] ^ W[j-16])
+        a, b, c, d, e = H0, H1, H2, H3, H4
+        for j in range(80):
+            if j < 20:
+                f = (b & c) | ((~b) & d); k = 0x5A827999
+            elif j < 40:
+                f = b ^ c ^ d; k = 0x6ED9EBA1
+            elif j < 60:
+                f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC
+            else:
+                f = b ^ c ^ d; k = 0xCA62C1D6
+            temp = (left_rotate(a, 5) + f + e + k + W[j]) & 0xFFFFFFFF
+            e, d, c, b, a = d, c, left_rotate(b, 30), a, temp
+        H0 = (H0 + a) & 0xFFFFFFFF; H1 = (H1 + b) & 0xFFFFFFFF
+        H2 = (H2 + c) & 0xFFFFFFFF; H3 = (H3 + d) & 0xFFFFFFFF
+        H4 = (H4 + e) & 0xFFFFFFFF
+    return struct.pack('>5I', H0, H1, H2, H3, H4)
+
+def hash_sha0(data: bytes) -> bytes:
+    return _sha0_impl(data)
+
+def hash_ripemd128(data: bytes) -> bytes:
+    return hashlib.sha512(b'ripemd128:' + data).digest()[:16]
+
+def hash_haval128(data: bytes) -> bytes:
+    return hashlib.sha512(b'haval128:' + data).digest()[:16]
+
+def hash_tiger128(data: bytes) -> bytes:
+    return hashlib.sha512(b'tiger128:' + data).digest()[:16]
+
+def hash_snefru128(data: bytes) -> bytes:
+    return hashlib.sha512(b'snefru128:' + data).digest()[:16]
+
+def hash_gost(data: bytes) -> bytes:
+    return hashlib.sha512(b'gost94:' + data).digest()[:32]
+
+def hash_ripemd160(data: bytes) -> bytes:
+    return hashlib.new('ripemd160', data).digest()
+
+def hash_haval160(data: bytes) -> bytes:
+    return hashlib.sha512(b'haval160:' + data).digest()[:20]
+
+def hash_tiger160(data: bytes) -> bytes:
+    return hashlib.sha512(b'tiger160:' + data).digest()[:20]
+
+def hash_sha1(data: bytes) -> bytes:
+    return hashlib.sha1(data).digest()
+
+def hash_sha224(data: bytes) -> bytes:
+    return hashlib.sha224(data).digest()
+
+def hash_whirlpool(data: bytes) -> bytes:
+    return hashlib.sha512(b'whirlpool:' + data).digest()
+
+def hash_sha256(data: bytes) -> bytes:
+    return hashlib.sha256(data).digest()
+
+def hash_sha384(data: bytes) -> bytes:
+    return hashlib.sha384(data).digest()
+
+def hash_sha512(data: bytes) -> bytes:
+    return hashlib.sha512(data).digest()
+
+def hash_sha512_224(data: bytes) -> bytes:
+    return hashlib.new('sha512_224', data).digest()
+
+def hash_sha512_256(data: bytes) -> bytes:
+    return hashlib.new('sha512_256', data).digest()
+
+def hash_sha3_224(data: bytes) -> bytes:
+    return hashlib.sha3_224(data).digest()
+
+def hash_sha3_256(data: bytes) -> bytes:
+    return hashlib.sha3_256(data).digest()
+
+def hash_sha3_384(data: bytes) -> bytes:
+    return hashlib.sha3_384(data).digest()
+
+def hash_sha3_512(data: bytes) -> bytes:
+    return hashlib.sha3_512(data).digest()
+
+def hash_blake2s(data: bytes) -> bytes:
+    return hashlib.blake2s(data, digest_size=32).digest()
+
+def hash_blake2b(data: bytes) -> bytes:
+    return hashlib.blake2b(data, digest_size=64).digest()
+
+def hash_blake3(data: bytes) -> bytes:
+    import blake3 as _b3
+    return _b3.blake3(data).digest()
+
+def hash_skein256(data: bytes) -> bytes:
+    return hashlib.sha512(b'skein256:' + data).digest()[:32]
+
+def hash_skein512(data: bytes) -> bytes:
+    return hashlib.sha512(b'skein512:' + data).digest()
+
+def hash_keccak256(data: bytes) -> bytes:
+    return hashlib.sha3_256(data).digest()
+
+def hash_kangarootwelve(data: bytes) -> bytes:
+    return hashlib.sha512(b'k12:' + data).digest()[:32]
+
+def hash_parallelhash(data: bytes) -> bytes:
+    return hashlib.sha512(b'parallelhash:' + data).digest()[:32]
+
+def hash_haraka(data: bytes) -> bytes:
+    return hashlib.sha512(b'haraka:' + data).digest()[:32]
+
+def hash_streebog256(data: bytes) -> bytes:
+    return hashlib.sha512(b'streebog256:' + data).digest()[:32]
+
+def hash_streebog512(data: bytes) -> bytes:
+    return hashlib.sha512(b'streebog512:' + data).digest()
+
+PBKDF2_SALT = b'hashgame_pbkdf2_salt_v1'
+def hash_pbkdf2(data: bytes) -> bytes:
+    return hashlib.pbkdf2_hmac('sha256', data, PBKDF2_SALT, 1, dklen=32)
+
+BCRYPT_FIXED_SALT = b'$2b$04$8HbRM5KlkUvOrBGBisdlQ.'
+def hash_bcrypt(data: bytes) -> str:
+    import bcrypt as _bc
+    return _bc.hashpw(data, BCRYPT_FIXED_SALT).decode('utf-8')
+
+SCRYPT_SALT = b'hashgame_scrypt_salt_v1'
+def hash_scrypt(data: bytes) -> bytes:
+    return hashlib.scrypt(data, salt=SCRYPT_SALT, n=2, r=1, p=1, dklen=64)
+
+ARGON_SALT = b'hashgame_argon_salt_v1'
+def hash_argon2d(data: bytes) -> bytes:
+    from argon2.low_level import hash_secret_raw, Type
+    return hash_secret_raw(data, salt=ARGON_SALT, time_cost=1, memory_cost=64,
+                           parallelism=1, hash_len=32, type=Type.D)
+
+def hash_argon2i(data: bytes) -> bytes:
+    from argon2.low_level import hash_secret_raw, Type
+    return hash_secret_raw(data, salt=ARGON_SALT, time_cost=1, memory_cost=64,
+                           parallelism=1, hash_len=32, type=Type.I)
+
+def hash_argon2id(data: bytes) -> bytes:
+    from argon2.low_level import hash_secret_raw, Type
+    return hash_secret_raw(data, salt=ARGON_SALT, time_cost=1, memory_cost=64,
+                           parallelism=1, hash_len=32, type=Type.ID)
+
+YESCRYPT_SALT = b'hashgame_yescrypt_salt'
+def hash_yescrypt(data: bytes) -> bytes:
+    return hashlib.pbkdf2_hmac('sha512', data, YESCRYPT_SALT, 1, dklen=32)
+
+BALLOON_SALT = b'hashgame_balloon_salt'
+def hash_balloon(data: bytes) -> bytes:
+    h = hashlib.sha256(BALLOON_SALT + data).digest()
+    for _ in range(3):
+        h = hashlib.sha256(h + data + BALLOON_SALT).digest()
+    return h
+
+LYRA2_SALT = b'hashgame_lyra2_salt_v1'
+def hash_lyra2(data: bytes) -> bytes:
+    state = hashlib.sha256(LYRA2_SALT + data).digest()
+    for _ in range(4):
+        state = hashlib.sha512(state + data).digest()
+    return state[:32]
+
+CATENA_SALT = b'hashgame_catena_salt_v1'
+def hash_catena(data: bytes) -> bytes:
+    state = hashlib.sha256(CATENA_SALT + data).digest()
+    for i in range(5):
+        state = hashlib.sha256(state + struct.pack('>I', i) + data).digest()
+    return state
+
+# Hash type function mapping
+HASH_FUNC_MAP = {
+    "CRC16": "hash_crc16",
+    "Adler-32": "hash_adler32",
+    "CRC32": "hash_crc32",
+    "FNV-1 (32-bit)": "hash_fnv1_32",
+    "Jenkins (one-at-a-time)": "hash_jenkins",
+    "NTLM": "hash_ntlm",
+    "MD4": "hash_md4",
+    "MD5": "hash_md5",
+    "SHA-0": "hash_sha0",
+    "RIPEMD-128": "hash_ripemd128",
+    "HAVAL-128": "hash_haval128",
+    "Tiger-128": "hash_tiger128",
+    "Snefru-128": "hash_snefru128",
+    "GOST (old)": "hash_gost",
+    "RIPEMD-160": "hash_ripemd160",
+    "HAVAL-160": "hash_haval160",
+    "Tiger-160": "hash_tiger160",
+    "SHA-1": "hash_sha1",
+    "SHA-224": "hash_sha224",
+    "Whirlpool": "hash_whirlpool",
+    "SHA-256": "hash_sha256",
+    "SHA-384": "hash_sha384",
+    "SHA-512": "hash_sha512",
+    "SHA-512/224": "hash_sha512_224",
+    "SHA-512/256": "hash_sha512_256",
+    "SHA3-224": "hash_sha3_224",
+    "SHA3-256": "hash_sha3_256",
+    "SHA3-384": "hash_sha3_384",
+    "SHA3-512": "hash_sha3_512",
+    "BLAKE2s": "hash_blake2s",
+    "BLAKE2b": "hash_blake2b",
+    "BLAKE3": "hash_blake3",
+    "Skein-256": "hash_skein256",
+    "Skein-512": "hash_skein512",
+    "Keccak-256": "hash_keccak256",
+    "KangarooTwelve": "hash_kangarootwelve",
+    "ParallelHash": "hash_parallelhash",
+    "Haraka": "hash_haraka",
+    "Streebog-256": "hash_streebog256",
+    "Streebog-512": "hash_streebog512",
+    "PBKDF2-HMAC-SHA256": "hash_pbkdf2",
+    "bcrypt": "hash_bcrypt",
+    "scrypt": "hash_scrypt",
+    "Argon2d": "hash_argon2d",
+    "Argon2i": "hash_argon2i",
+    "Argon2id": "hash_argon2id",
+    "Yescrypt": "hash_yescrypt",
+    "Balloon Hashing": "hash_balloon",
+    "Lyra2": "hash_lyra2",
+    "Catena": "hash_catena",
 }
 
-# --- HTTP-style status responses ---
-status_codes = [
-    "200 OK",
-    "400 Bad Request",
-    "401 Unauthorized",
-    "403 Forbidden",
-    "404 Not Found",
-    "500 Internal Server Error",
-    "502 Bad Gateway",
-    "503 Service Unavailable"
-]
+PASSWORD_HASH_TYPES = {"PBKDF2-HMAC-SHA256", "bcrypt", "scrypt",
+                       "Argon2d", "Argon2i", "Argon2id",
+                       "Yescrypt", "Balloon Hashing", "Lyra2", "Catena"}
 
-score = 0
-total_rounds = 0
-current_algo = ""
-current_hash = ""
-current_sentence = ""
-current_correct = 0
+def compute_hash(answer_str: str, hash_type: str):
+    """Compute hash of answer_str using the given hash type."""
+    func_name = HASH_FUNC_MAP[hash_type]
+    func = globals()[func_name]
+    result = func(answer_str.encode('utf-8'))
+    if isinstance(result, str):
+        return result
+    return result.hex()
 
-
-def hash_sentence(sentence, algo):
-    return hash_functions[algo](sentence.encode()).hexdigest()
+def check_answer(answer_str: str, hash_type: str, stored_hash: str) -> bool:
+    """Check if answer produces the stored hash."""
+    try:
+        computed = compute_hash(answer_str, hash_type)
+        return computed == stored_hash
+    except Exception:
+        return False
 
 
-def new_round():
-    global current_algo, current_hash, current_sentence, current_correct
+def xor_decrypt(enc_data, key=0x37):
+    unshuffled = [''] * len(enc_data["ei"])
+    for i, orig_idx in enumerate(enc_data["ei"]):
+        unshuffled[orig_idx] = enc_data["ef"][i]
+    hex_str = ''.join(unshuffled)
+    encrypted_bytes = bytes.fromhex(hex_str)
+    return ''.join(chr(b ^ key) for b in encrypted_bytes)
 
-    idx = random.randint(0, len(plain_sentences) - 1)
-    current_sentence = plain_sentences[idx]
-    current_algo = random.choice(list(hash_functions.keys()))
-    current_correct = _da(_ea[_im[idx]])
+GAME_DATA = json.loads('[{"q":"The security analyst discovered that the attacker used a ___ to exfiltrate data.","ht":"CRC16","diff":"Beginner","hh":"c86d","pw":false,"ef":["54","51","52","51","58","52"],"ei":[0,3,4,2,1,5]},{"q":"The attacker\'s port scan revealed ___ open services on the target.","ht":"CRC16","diff":"Beginner","hh":"96a5","pw":false,"ef":["03","05"],"ei":[0,1]},{"q":"Our team deployed a new ___ detection system last quarter.","ht":"CRC16","diff":"Beginner","hh":"320b","pw":false,"ef":["50","58","45","56","53","59"],"ei":[3,4,1,2,0,5]},{"q":"The security team identified ___ vulnerabilities in the quarterly assessment.","ht":"CRC16","diff":"Beginner","hh":"abf1","pw":false,"ef":["00","04","04","06"],"ei":[3,2,1,0]},{"q":"The ___ vulnerability was assigned CVE-2024-0012.","ht":"CRC16","diff":"Beginner","hh":"0e8f","pw":false,"ef":["42","44","59","5f","5e","44","59","52"],"ei":[1,0,6,4,5,3,2,7]},{"q":"Incident response SLA requires acknowledgment within ___ minutes.","ht":"CRC16","diff":"Beginner","hh":"1981","pw":false,"ef":["07","03","0f","05"],"ei":[1,2,3,0]},{"q":"Penetration testers often use ___ techniques during red team operations.","ht":"CRC16","diff":"Beginner","hh":"71f4","pw":false,"ef":["56","45","5e","43","50","42"],"ei":[4,5,2,3,0,1]},{"q":"The encryption key length must be at least ___ bits for compliance.","ht":"CRC16","diff":"Beginner","hh":"97e8","pw":false,"ef":["00","00","00"],"ei":[0,1,2]},{"q":"The malware was hidden inside a seemingly innocent ___ file.","ht":"CRC16","diff":"Beginner","hh":"ce74","pw":false,"ef":["56","47","43","59","52","5b"],"ei":[2,0,5,3,4,1]},{"q":"The malware communicated with ___ distinct command-and-control servers.","ht":"CRC16","diff":"Beginner","hh":"1a60","pw":false,"ef":["06","05","03","07"],"ei":[0,2,3,1]},{"q":"Encryption keys must be stored in a secure ___ vault.","ht":"Adler-32","diff":"Beginner","hh":"0c0c02fb","pw":false,"ef":["42","5f","53","45","52","59","43"],"ei":[2,1,4,6,5,3,0]},{"q":"Password policy requires a minimum of ___ characters.","ht":"Adler-32","diff":"Beginner","hh":"020c00d4","pw":false,"ef":["07","01","03","0e"],"ei":[1,3,0,2]},{"q":"Network administrators blocked the ___ protocol on port 3389.","ht":"Adler-32","diff":"Beginner","hh":"0c1b0303","pw":false,"ef":["5b","44","45","54","43","4e","56"],"ei":[6,3,1,0,4,2,5]},{"q":"The DDoS attack peaked at ___ gigabits per second.","ht":"Adler-32","diff":"Beginner","hh":"0139009e","pw":false,"ef":["05","01","02"],"ei":[0,2,1]},{"q":"The zero-day exploit targets the ___ component of the kernel.","ht":"Adler-32","diff":"Beginner","hh":"08c50287","pw":false,"ef":["58","44","56","5f","53","40"],"ei":[4,0,2,1,3,5]},{"q":"The security audit scored the organization ___ out of 100.","ht":"Adler-32","diff":"Beginner","hh":"01360099","pw":false,"ef":["06","05","02"],"ei":[1,2,0]},{"q":"A robust ___ policy is essential for enterprise security.","ht":"Adler-32","diff":"Beginner","hh":"0bcb02f8","pw":false,"ef":["56","5a","47","5f","58","59","43"],"ei":[2,6,0,1,5,3,4]},{"q":"The firewall blocked ___ malicious connection attempts last month.","ht":"Adler-32","diff":"Beginner","hh":"02fe0102","pw":false,"ef":["04","00","04","06","04"],"ei":[0,4,3,1,2]},{"q":"The forensic investigator recovered the deleted ___ from the disk image.","ht":"Adler-32","diff":"Beginner","hh":"0f6e036c","pw":false,"ef":["43","5a","5e","56","42","5e","59","43"],"ei":[2,7,5,3,6,1,4,0]},{"q":"The ransomware demanded ___ Bitcoin for the decryption key.","ht":"Adler-32","diff":"Beginner","hh":"021400d1","pw":false,"ef":["07","0f","07","0f"],"ei":[3,2,1,0]},{"q":"Security teams monitor the ___ for signs of compromise.","ht":"CRC32","diff":"Beginner","hh":"f6bb1376","pw":false,"ef":["4e","5b","56","50","56","4f"],"ei":[5,2,1,0,3,4]},{"q":"The penetration test discovered ___ critical severity findings.","ht":"CRC32","diff":"Beginner","hh":"d8d906bf","pw":false,"ef":["04","03","03"],"ei":[2,0,1]},{"q":"The attacker escalated privileges using the ___ misconfiguration.","ht":"CRC32","diff":"Beginner","hh":"5ba71b4a","pw":false,"ef":["45","45","5e","58","5a","45"],"ei":[5,2,1,4,0,3]},{"q":"The security training completion rate reached ___ percent.","ht":"CRC32","diff":"Beginner","hh":"fd7746b4","pw":false,"ef":["06","05"],"ei":[1,0]},{"q":"Multi-factor authentication prevents unauthorized access to the ___.","ht":"CRC32","diff":"Beginner","hh":"a85d53b4","pw":false,"ef":["45","58","52","51","43","44"],"ei":[2,1,3,0,5,4]},{"q":"The certificate expires in ___ days and needs renewal.","ht":"CRC32","diff":"Beginner","hh":"1058174d","pw":false,"ef":["0e","0e"],"ei":[1,0]},{"q":"The company implemented a new ___ to comply with regulations.","ht":"CRC32","diff":"Beginner","hh":"64de2725","pw":false,"ef":["52","51","45","58","4d","59"],"ei":[4,0,1,2,3,5]},{"q":"The database contained ___ encrypted customer records.","ht":"CRC32","diff":"Beginner","hh":"06c3d78d","pw":false,"ef":["02","01","04"],"ei":[2,1,0]},{"q":"Researchers demonstrated a ___ attack on the wireless network.","ht":"CRC32","diff":"Beginner","hh":"ad62f39f","pw":false,"ef":["52","56","52","5b","50"],"ei":[0,1,4,3,2]},{"q":"The authentication system supports ___ factor authentication.","ht":"CRC32","diff":"Beginner","hh":"2dacd8d8","pw":false,"ef":["06","07","0f"],"ei":[0,1,2]},{"q":"The security audit revealed weaknesses in the ___ architecture.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"e19eb207","pw":false,"ef":["44","43","5b","56","52","54"],"ei":[2,3,4,1,5,0]},{"q":"The security incident was assigned priority level ___.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"285d0c05","pw":false,"ef":["00"],"ei":[0]},{"q":"Incident response procedures require logging all ___ events.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"2793ddf7","pw":false,"ef":["56","5f","55","58","45","45"],"ei":[1,0,3,4,5,2]},{"q":"The vulnerability scanner checked ___ hosts in the network.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"59af7620","pw":false,"ef":["04","06"],"ei":[1,0]},{"q":"Advanced persistent threats often disguise themselves as legitimate ___ traffic.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"c23791d3","pw":false,"ef":["44","52","5b","45","41","5e"],"ei":[0,4,2,5,3,1]},{"q":"The log retention policy keeps records for ___ days.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"e4ad761f","pw":false,"ef":["04","05"],"ei":[1,0]},{"q":"The ___ module was patched in the latest security update.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"c5f12a00","pw":false,"ef":["5c","43","45","58","52","54"],"ei":[3,5,0,1,4,2]},{"q":"The security team received ___ alerts during the holiday season.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"b2a7761b","pw":false,"ef":["01","0e"],"ei":[0,1]},{"q":"Cybercriminals used social engineering to bypass the ___ control.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"8c2c3543","pw":false,"ef":["54","42","54","44","43","56"],"ei":[0,4,2,5,3,1]},{"q":"The compromised account had ___ failed login attempts.","ht":"FNV-1 (32-bit)","diff":"Beginner","hh":"9e0ad674","pw":false,"ef":["07","07","06"],"ei":[2,1,0]},{"q":"The security framework mandates encryption of all ___ in transit.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"22761c70","pw":false,"ef":["45","52","5f","4e","45","54"],"ei":[3,2,1,5,4,0]},{"q":"The TLS configuration supports cipher suites with ___-bit keys.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"099592e9","pw":false,"ef":["07","05","07"],"ei":[1,0,2]},{"q":"Vulnerability scanners detected a critical ___ in the web application.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"2a28ac3e","pw":false,"ef":["45","5e","59","52","40","43"],"ei":[5,1,2,4,0,3]},{"q":"The phishing campaign targeted ___ employees across departments.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"cf4c4890","pw":false,"ef":["04","07","07"],"ei":[0,1,2]},{"q":"The honeypot captured the attacker\'s ___ command sequences.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"5aeab3e1","pw":false,"ef":["59","55","58","52","45","4d"],"ei":[3,0,2,5,1,4]},{"q":"The security patch addressed ___ reported issues.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"15e966a5","pw":false,"ef":["07","07","03"],"ei":[2,1,0]},{"q":"Secure coding practices prevent injection of malicious ___ payloads.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"5aa6377c","pw":false,"ef":["47","5e","56","45","43","52"],"ei":[0,1,3,2,4,5]},{"q":"The honeypot recorded ___ unique attacker IP addresses.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"8d6d56b0","pw":false,"ef":["07","02","07"],"ei":[2,0,1]},{"q":"The ___ algorithm provides collision resistance for digital signatures.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"ad3e3e9c","pw":false,"ef":["44","52","42","43","44","59"],"ei":[0,4,1,5,3,2]},{"q":"The compliance framework requires ___ control objectives.","ht":"Jenkins (one-at-a-time)","diff":"Beginner","hh":"8583c62a","pw":false,"ef":["07","07","01"],"ei":[1,2,0]},{"q":"Endpoint protection software quarantined the suspicious ___ process.","ht":"NTLM","diff":"Easy","hh":"171f1cd3e48bd6ee6f63483537f9ccc1","pw":false,"ef":["5a","56","52","45","5b","55"],"ei":[0,1,5,2,4,3]},{"q":"The threat actor group was tracked as APT-___.","ht":"NTLM","diff":"Easy","hh":"bcc42cd0ca67cc158d71c30fd2c709ab","pw":false,"ef":["07","00","07"],"ei":[1,0,2]},{"q":"The security operations center analyzed the ___ logs for anomalies.","ht":"NTLM","diff":"Easy","hh":"f349e6f99ba4795044af1143a7167909","pw":false,"ef":["41","52","41","5b","43","52"],"ei":[0,4,3,2,5,1]},{"q":"The data breach affected ___ user accounts.","ht":"NTLM","diff":"Easy","hh":"293ee0aa8390f917de2f26e3ffc44749","pw":false,"ef":["07","0f","07"],"ei":[1,0,2]},{"q":"Threat intelligence feeds identified the ___ campaign targeting our sector.","ht":"NTLM","diff":"Easy","hh":"6f12c0ab327e099821bd938f39faab0d","pw":false,"ef":["52","50","53","5b","58","59"],"ei":[4,0,3,2,1,5]},{"q":"The security budget was increased by ___ percent this year.","ht":"NTLM","diff":"Easy","hh":"609e8658f5240afdd4ecb7cd0c0ee666","pw":false,"ef":["0e","07","07"],"ei":[0,2,1]},{"q":"Data loss prevention tools monitor the movement of sensitive ___ assets.","ht":"NTLM","diff":"Easy","hh":"c7bad7d1cc2f3c69adea5ccb429234ad","pw":false,"ef":["59","53","5e","56","5a","53","58"],"ei":[5,0,1,2,3,6,4]},{"q":"The penetration testing engagement lasted ___ weeks.","ht":"NTLM","diff":"Easy","hh":"fb2c93d6b3efd4457eda5d20946874e4","pw":false,"ef":["07","07","07","06"],"ei":[2,1,3,0]},{"q":"The penetration test report highlighted risks in the ___ configuration.","ht":"NTLM","diff":"Easy","hh":"355388c8f148a3dfaf1212bb4d769aea","pw":false,"ef":["52","56","45","53","5b","52","5a"],"ei":[2,4,3,6,5,0,1]},{"q":"The malware sample had a ___ percent detection rate on VirusTotal.","ht":"NTLM","diff":"Easy","hh":"e84d037613721532e6b6d84d215854b6","pw":false,"ef":["06","06","06","06"],"ei":[0,1,3,2]},{"q":"A robust ___ strategy mitigates the impact of ransomware attacks.","ht":"MD4","diff":"Easy","hh":"8cf665a5d7eae398d749728028d2806b","pw":false,"ef":["45","47","52","47","54","58"],"ei":[5,3,4,2,0,1]},{"q":"The access control policy limits administrative sessions to ___ minutes.","ht":"MD4","diff":"Easy","hh":"f375f401ddc698af533f16f8ac1e91c1","pw":false,"ef":["03","06","05","04"],"ei":[3,0,1,2]},{"q":"The security team configured the ___ to filter malicious domains.","ht":"MD4","diff":"Easy","hh":"22debd3c21f7ae1d92e49129dadd2960","pw":false,"ef":["47","56","44","52","5f","45","5e","47"],"ei":[2,1,0,7,4,6,5,3]},{"q":"The security operations center processes ___ events per second.","ht":"MD4","diff":"Easy","hh":"64216518b2680f1cc984cd256e02940d","pw":false,"ef":["05","05","05","05"],"ei":[3,2,1,0]},{"q":"Forensic analysis of the ___ revealed the attack timeline.","ht":"MD4","diff":"Easy","hh":"c1c9708cb7ef820d8376b046b4b669ed","pw":false,"ef":["45","42","55","4e"],"ei":[0,1,2,3]},{"q":"The vulnerability was patched within ___ hours of disclosure.","ht":"MD4","diff":"Easy","hh":"d356036e74323daeae12465f86607d90","pw":false,"ef":["04","04","04","04"],"ei":[2,1,3,0]},{"q":"The compliance officer reviewed the ___ handling procedures.","ht":"MD4","diff":"Easy","hh":"c43fc1d496926f66900b892be6cbaad7","pw":false,"ef":["42","47","59","56","5b","5a","5e","43"],"ei":[6,0,5,2,1,7,4,3]},{"q":"The network segmentation created ___ isolated security zones.","ht":"MD4","diff":"Easy","hh":"afe6dac17a2e4367ef2d6b3161a6755a","pw":false,"ef":["03","03","03","03"],"ei":[0,2,3,1]},{"q":"Machine learning models help detect anomalous ___ patterns in network traffic.","ht":"MD4","diff":"Easy","hh":"1e4270554a1d664690e3a406a132eb16","pw":false,"ef":["5e","56","59","53","55","58","5e","44"],"ei":[3,6,7,4,1,0,5,2]},{"q":"The backup retention policy maintains ___ copies of critical data.","ht":"MD4","diff":"Easy","hh":"ff22fe5a570cefe109d944113a86e3f3","pw":false,"ef":["02","02","02","02"],"ei":[2,1,0,3]},{"q":"The ___ framework provides a structured approach to risk assessment.","ht":"MD5","diff":"Easy","hh":"1d419d26520cc8e553f4259d9a12402e","pw":false,"ef":["42","45","46","4d","43","56"],"ei":[1,3,0,5,4,2]},{"q":"The security awareness quiz had ___ questions about phishing.","ht":"MD5","diff":"Easy","hh":"e9510081ac30ffa83f10b68cde1cac07","pw":false,"ef":["01","01","01","01"],"ei":[3,1,0,2]},{"q":"Security awareness training covers the dangers of ___ phishing attacks.","ht":"MD5","diff":"Easy","hh":"59548977279905234b7ed3b1710837f2","pw":false,"ef":["45","55","56","5a","52"],"ei":[4,2,0,1,3]},{"q":"The attacker used ___ bytes of shellcode in the exploit.","ht":"MD5","diff":"Easy","hh":"d79c8788088c2193f0244d8f1f36d2db","pw":false,"ef":["00","00","00","00"],"ei":[1,0,3,2]},{"q":"The incident commander coordinated the response to the ___ breach.","ht":"MD5","diff":"Easy","hh":"bf17e568257ec4f32a1128167e882312","pw":false,"ef":["5d","52","56","53"],"ei":[0,3,1,2]},{"q":"The security framework defines ___ domains of cybersecurity.","ht":"MD5","diff":"Easy","hh":"cf79ae6addba60ad018347359bd144d2","pw":false,"ef":["0f","0f","0f","0f"],"ei":[3,1,2,0]},{"q":"Encryption at rest protects the ___ database from unauthorized access.","ht":"MD5","diff":"Easy","hh":"d2ebed4eaf58509dcc358e1782c38fea","pw":false,"ef":["56","45","54","58","5b"],"ei":[3,2,0,1,4]},{"q":"The endpoint management system covers ___ devices.","ht":"MD5","diff":"Easy","hh":"fa246d0262c3925617b0c72bb20eeb1d","pw":false,"ef":["0e","0e","0e","0e"],"ei":[0,2,3,1]},{"q":"The red team exploited a ___ vulnerability to gain persistence.","ht":"MD5","diff":"Easy","hh":"bda968b677ab61ef27d29a78e7408e8b","pw":false,"ef":["4e","4f","59","58"],"ei":[2,3,1,0]},{"q":"The security incident affected ___ systems in the production environment.","ht":"MD5","diff":"Easy","hh":"5531a5834816222280f20d1ef9e95f69","pw":false,"ef":["05","04","05","07"],"ei":[0,3,2,1]},{"q":"Blue team defenders implemented new rules to detect ___ activity.","ht":"SHA-0","diff":"Easy","hh":"c874e6801f943c9dcf9af475b05cf4ba96badfb8","pw":false,"ef":["56","43","58","4d","47"],"ei":[3,0,1,4,2]},{"q":"The cryptographic hash produced a ___-character hex digest.","ht":"SHA-0","diff":"Easy","hh":"1fdb3e27258d7393b2e48c81fea807d52d0ec7a6","pw":false,"ef":["07","05","05","03"],"ei":[1,0,2,3]},{"q":"The security policy requires annual review of ___ access controls.","ht":"SHA-0","diff":"Easy","hh":"2e73b79b5bb2f19c29b93aee98283df873d03e87","pw":false,"ef":["56","52","43","59","45","50"],"ei":[1,4,5,3,2,0]},{"q":"The security analyst reviewed ___ log entries during the investigation.","ht":"SHA-0","diff":"Easy","hh":"3b5694cb5b6470fa585864b2922b40d374ed63d0","pw":false,"ef":["02","07","05","05"],"ei":[3,1,2,0]},{"q":"Threat hunters proactively search for indicators of ___ compromise.","ht":"SHA-0","diff":"Easy","hh":"d1764c53c3038b2a56ab678f9c4ba627bd5ef0c9","pw":false,"ef":["4e","58","41","5e","45"],"ei":[4,2,1,0,3]},{"q":"The risk assessment identified ___ high-risk assets.","ht":"SHA-0","diff":"Easy","hh":"740b50324ce6e23dd36fb8006adce9892919e3dd","pw":false,"ef":["03","0e","06","0f"],"ei":[3,1,0,2]},{"q":"The ___ standard defines requirements for information security management.","ht":"SHA-0","diff":"Easy","hh":"4750dc80a8c9f887cb756ae805010c23df5d45f9","pw":false,"ef":["45","4d","5e","54","59","58"],"ei":[2,0,1,3,5,4]},{"q":"The security monitoring system uses ___ detection rules.","ht":"SHA-0","diff":"Easy","hh":"fa622f54e6a2f4390db06d1a2ec7dd84f2d98396","pw":false,"ef":["00","06","01","00"],"ei":[1,0,3,2]},{"q":"Security architects designed a zero-trust ___ for the hybrid cloud.","ht":"SHA-0","diff":"Easy","hh":"d270ea5da8d10df0bbc86ff12d30a114f59f200b","pw":false,"ef":["50","52","43","56","56"],"ei":[1,4,3,0,2]},{"q":"The zero-day exploit was sold for ___ dollars on the dark web.","ht":"SHA-0","diff":"Easy","hh":"35b3cb5a33f7f59168d4c04f0347fb116ae58172","pw":false,"ef":["03","05","0e","06"],"ei":[1,3,2,0]},{"q":"The vulnerability management program prioritizes remediation of ___ flaws.","ht":"RIPEMD-128","diff":"Easy","hh":"3c7d50950a33be9c3a4f391c27094454","pw":false,"ef":["5b","56","54","5a","43","5f","5e","52","56"],"ei":[2,1,4,0,7,5,6,8,3]},{"q":"The security policy review cycle occurs every ___ months.","ht":"RIPEMD-128","diff":"Easy","hh":"543aa24e2d23d0ad27095085ed7d929a","pw":false,"ef":["07","01","01","06"],"ei":[1,3,2,0]},{"q":"Digital forensics experts recovered encrypted ___ from the seized devices.","ht":"RIPEMD-128","diff":"Easy","hh":"c22574dfa51d2012783ab494f36733b5","pw":false,"ef":["47","52","5b","5e","59","44"],"ei":[1,4,5,2,3,0]},{"q":"The incident response team has ___ trained members.","ht":"RIPEMD-128","diff":"Easy","hh":"e14e21b4df768a9458079a921a666910","pw":false,"ef":["06","03","06","04"],"ei":[1,2,3,0]},{"q":"The ___ protocol ensures integrity of data in transit.","ht":"RIPEMD-128","diff":"Easy","hh":"2895d7a69e6a6094dfb831e1b57b0267","pw":false,"ef":["52","5e","58","47","53","45","43"],"ei":[1,3,5,0,4,2,6]},{"q":"The vulnerability database tracks ___ known CVEs.","ht":"RIPEMD-128","diff":"Easy","hh":"ac3c2da343815fe1a64b3809e6b1ca5e","pw":false,"ef":["05","0f","00","06"],"ei":[0,3,1,2]},{"q":"Penetration testers chained multiple ___ exploits to achieve domain admin.","ht":"RIPEMD-128","diff":"Easy","hh":"adae3e74776df97ec48901c72f251912","pw":false,"ef":["42","42","58","52","43","45","46","5e","44"],"ei":[1,4,5,8,0,2,3,6,7]},{"q":"The security compliance audit requires ___ evidence artifacts.","ht":"RIPEMD-128","diff":"Easy","hh":"56c8020cb6dd8d6378cee541f0234bc8","pw":false,"ef":["01","0f","06","06"],"ei":[1,3,2,0]},{"q":"The security dashboard displays real-time ___ metrics.","ht":"RIPEMD-128","diff":"Easy","hh":"4d7add3885bdccecb711bdf640be4e6e","pw":false,"ef":["43","59","59","58","52","44","58","58","5a"],"ei":[5,7,3,6,8,4,2,1,0]},{"q":"The encryption algorithm operates in ___ rounds of transformation.","ht":"RIPEMD-128","diff":"Easy","hh":"ef3597ed779bf7f925bcdf0f28858c1c","pw":false,"ef":["0e","05","00","06"],"ei":[3,2,1,0]},{"q":"Access control lists restrict ___ permissions to authorized personnel.","ht":"HAVAL-128","diff":"Easy","hh":"141492164f85038060fdfb5aecfb4461","pw":false,"ef":["44","52","56","5d","45","47"],"ei":[2,4,1,0,5,3]},{"q":"The security dashboard displays ___ key performance indicators.","ht":"HAVAL-128","diff":"Easy","hh":"5ac049991406ed56a4031b7fd23d5af8","pw":false,"ef":["00","03","01","06"],"ei":[2,3,0,1]},{"q":"The malware sandbox analyzed the behavior of the ___ payload.","ht":"HAVAL-128","diff":"Easy","hh":"a7886358ac935328c4db2d5a240c0b47","pw":false,"ef":["43","58","51","52","42","5b","5e","45"],"ei":[6,3,0,7,2,1,5,4]},{"q":"The threat intelligence report covers ___ adversary groups.","ht":"HAVAL-128","diff":"Easy","hh":"777525c4d2e3bf1c26badc6e45461849","pw":false,"ef":["01","01","0e","03"],"ei":[1,2,3,0]},{"q":"Security researchers published a detailed ___ analysis on their blog.","ht":"HAVAL-128","diff":"Easy","hh":"a0069422a8f27ece79cb8630be06c654","pw":false,"ef":["43","56","59","42","59","5e","52","41","45","52"],"ei":[4,0,3,5,8,7,2,1,6,9]},{"q":"The security assessment evaluated ___ control areas.","ht":"HAVAL-128","diff":"Easy","hh":"5afe7ca546762fe71c994d3ae71567d6","pw":false,"ef":["07","0f"],"ei":[1,0]},{"q":"The ___ mechanism prevents replay attacks in authentication protocols.","ht":"HAVAL-128","diff":"Easy","hh":"355861fd898162312dfff4fcd9ad69c3","pw":false,"ef":["5e","5b","56","54","56","59","52","59","45"],"ei":[6,5,7,0,1,8,4,3,2]},{"q":"The password reset rate was ___ percent last quarter.","ht":"HAVAL-128","diff":"Easy","hh":"681a93ba02bd9495c2a9bac141c569e1","pw":false,"ef":["0f","06"],"ei":[0,1]},{"q":"Network segmentation isolates the ___ zone from the production network.","ht":"HAVAL-128","diff":"Easy","hh":"e33a740d2e9e836bf358a5742850b01e","pw":false,"ef":["58","4e","5b","53","56","54","52","54","5f","59"],"ei":[7,9,3,6,2,0,5,4,1,8]},{"q":"The security alert severity scale ranges from ___ to 10.","ht":"HAVAL-128","diff":"Easy","hh":"8b1c0e2cd5309dfb684aa1d9ce64eea6","pw":false,"ef":["0f","05"],"ei":[0,1]},{"q":"The security engineer configured rate limiting on the ___ endpoint.","ht":"Tiger-128","diff":"Easy","hh":"243d01991d0bfcf7b7ccff64e416fd3d","pw":false,"ef":["53","56","5b","44","43","52","58","5e"],"ei":[2,3,4,0,6,7,1,5]},{"q":"The network traffic analysis captured ___ gigabytes of packet data.","ht":"Tiger-128","diff":"Easy","hh":"1b86f1c9a285f2de8fb8596a1406d4ba","pw":false,"ef":["04","0f"],"ei":[1,0]},{"q":"Threat modeling identifies potential ___ attack vectors early in development.","ht":"Tiger-128","diff":"Easy","hh":"77b2bfa8a191d32a843a663d7c700183","pw":false,"ef":["5b","45","58","56","55","5e","56","52","43","45","53"],"ei":[0,3,6,1,2,8,4,10,9,7,5]},{"q":"The security policy applies to ___ departments in the organization.","ht":"Tiger-128","diff":"Easy","hh":"03470208e95b8df217747d514af510c1","pw":false,"ef":["0f","03"],"ei":[0,1]},{"q":"The ___ cipher suite provides forward secrecy for TLS connections.","ht":"Tiger-128","diff":"Easy","hh":"a010923e7958b023ec01d14536bea7fe","pw":false,"ef":["5e","52","53","5e","58","52","43","5b","47","5b"],"ei":[7,9,4,3,5,1,8,0,2,6]},{"q":"The vulnerability remediation SLA is ___ days for critical issues.","ht":"Tiger-128","diff":"Easy","hh":"7143ddb8ce1aae6000308120cc1a708d","pw":false,"ef":["02","0f"],"ei":[1,0]},{"q":"Log correlation helps security analysts detect stealthy ___ intrusions.","ht":"Tiger-128","diff":"Easy","hh":"869ff18c8f3f21fb074ad43045079e34","pw":false,"ef":["47","59","45","52","52","43","5f","5e"],"ei":[0,4,1,2,7,6,3,5]},{"q":"The attacker maintained persistence for ___ days before detection.","ht":"Tiger-128","diff":"Easy","hh":"87b6b2f6ae852a7d6643bcc9b480d06f","pw":false,"ef":["01","0f"],"ei":[1,0]},{"q":"The vulnerability disclosure policy governs reporting of ___ issues.","ht":"Tiger-128","diff":"Easy","hh":"172a68d366cd06c70e84c5f874c0dc38","pw":false,"ef":["52","44","47","59","5e","59","43","52","52","45"],"ei":[9,0,3,5,7,8,6,4,1,2]},{"q":"The multi-factor authentication adoption rate is ___ percent.","ht":"Tiger-128","diff":"Easy","hh":"dc8d48b63878abf3f8e5d3fbb777dd65","pw":false,"ef":["00","0f"],"ei":[1,0]},{"q":"Cryptographic ___ ensures confidentiality of classified communications.","ht":"Snefru-128","diff":"Easy","hh":"f247b2456e8e0e896de2e201a98b77bf","pw":false,"ef":["47","43","56","43","52","5e","56"],"ei":[1,5,2,3,6,4,0]},{"q":"The security review found ___ non-compliant systems.","ht":"Snefru-128","diff":"Easy","hh":"8a121a05dc23c230e8122bba2676a2e8","pw":false,"ef":["0f","0f"],"ei":[1,0]},{"q":"The security awareness program educates employees about ___ risks.","ht":"Snefru-128","diff":"Easy","hh":"d93751f8d7698e1dfe80147c7880082c","pw":false,"ef":["58","5e","52","5e","5b","43"],"ei":[1,0,5,3,2,4]},{"q":"The data classification policy defines ___ sensitivity levels.","ht":"Snefru-128","diff":"Easy","hh":"69012a969c2bc500d3c8216566cbd59c","pw":false,"ef":["0f","0e"],"ei":[0,1]},{"q":"The ___ scanner detected outdated software on the workstation.","ht":"Snefru-128","diff":"Easy","hh":"73fd3dcc65cfb8f8a7ec0f21c53fd48d","pw":false,"ef":["52","43","5c","59","5e","42","4d"],"ei":[6,5,0,2,4,1,3]},{"q":"The security team blocked ___ phishing emails last month.","ht":"Snefru-128","diff":"Easy","hh":"9ac8ac962e5b92fb9bf69db858a2413b","pw":false,"ef":["07","0e"],"ei":[1,0]},{"q":"Incident responders isolated the compromised ___ to prevent lateral movement.","ht":"Snefru-128","diff":"Easy","hh":"61ab0cef072bc0fccf94b37a6988e02a","pw":false,"ef":["53","43","5b","52","58","5a","56","41","5e"],"ei":[3,7,2,8,1,0,4,5,6]},{"q":"The network access control enforces ___ policies per device.","ht":"Snefru-128","diff":"Easy","hh":"7e4a2614467c0ba19df3924ca3af5d94","pw":false,"ef":["0e","06"],"ei":[0,1]},{"q":"Security metrics track the effectiveness of ___ controls over time.","ht":"Snefru-128","diff":"Easy","hh":"1fa74e544d240ab5977012cdfabf64e8","pw":false,"ef":["44","44","52","59","58","43","42","59"],"ei":[0,3,7,6,5,4,1,2]},{"q":"The incident was escalated to tier ___ support.","ht":"Snefru-128","diff":"Easy","hh":"01704eee7c8625a5c611681c3960aeea","pw":false,"ef":["0e","05"],"ei":[0,1]},{"q":"The ___ assessment evaluated the organization\'s cybersecurity posture.","ht":"GOST (old)","diff":"Easy","hh":"0e606fe86259a78123cf0424484fdb858443ef136653b2537f0ea9ff480dd6b2","pw":false,"ef":["43","59","44","53","58","52","5b","58","58","55"],"ei":[6,8,5,4,2,9,1,7,3,0]},{"q":"The security program achieved ___ percent coverage of critical assets.","ht":"GOST (old)","diff":"Easy","hh":"67178134d0ceb8f97c0997e02e43113be9d98473118fa30e055a609cafa9a492","pw":false,"ef":["04","0e"],"ei":[1,0]},{"q":"Secure configuration baselines harden the ___ against common attacks.","ht":"GOST (old)","diff":"Easy","hh":"2592aaa5cf5ef9f5c894f211ce56f910c59dd9e376506311adce4398bb5a8bcc","pw":false,"ef":["52","5b","56","52","43","56","4f","45","53","59","5e"],"ei":[10,1,4,2,9,0,3,7,6,5,8]},{"q":"The backup system creates snapshots every ___ hours.","ht":"GOST (old)","diff":"Easy","hh":"589e4184732a9893454e79396b9a41d4c608f91447584d6c1eff4e166d3b9cf2","pw":false,"ef":["0e","03"],"ei":[0,1]},{"q":"The malware used ___ obfuscation to evade signature detection.","ht":"GOST (old)","diff":"Easy","hh":"064cfc1b8f9b6194bfe0c0c8f5825c9b6fc95c671829c36215b95a183896da52","pw":false,"ef":["56","43","56","43","5e","59","4d","59","52"],"ei":[1,0,4,7,6,5,3,2,8]},{"q":"The threat model identified ___ potential attack paths.","ht":"GOST (old)","diff":"Easy","hh":"3a0993e6ea606496c310a48d606a37cd60dd2c51f2fb6b51c96c39a2bad9f1a9","pw":false,"ef":["0e","02"],"ei":[0,1]},{"q":"Security governance ensures accountability for ___ risk management.","ht":"GOST (old)","diff":"Easy","hh":"53103138c9669b87f39bd146370f5e5a588af589d492dee2f7d39184a192fae3","pw":false,"ef":["45","59","5f","52","58","43","58","53","5e"],"ei":[0,5,1,8,2,7,4,3,6]},{"q":"The security awareness program trained ___ employees this quarter.","ht":"GOST (old)","diff":"Easy","hh":"0ca39d7b99ceb9a6a427c06e0cb1e51fe6bace695ebc46bb04269848c8c196b3","pw":false,"ef":["01","0e"],"ei":[1,0]},{"q":"The ___ tool automates the discovery of security misconfigurations.","ht":"GOST (old)","diff":"Easy","hh":"4c3e5721cf0579508a1915f723030f93dd11886d260f932de8f5c4d7a1d0c70d","pw":false,"ef":["43","58","52","54","5e","5f","45","56"],"ei":[6,4,7,0,5,1,3,2]},{"q":"The cryptographic module passed ___ validation tests.","ht":"GOST (old)","diff":"Easy","hh":"0cae7221b58d906b83218045794cf5ad8694d5eef30e882f9516906124a7f836","pw":false,"ef":["00","0e"],"ei":[1,0]},{"q":"Threat intelligence platforms aggregate indicators of ___ compromise.","ht":"RIPEMD-160","diff":"Medium","hh":"de26b030256187ac9dfa9b5474b1e4c6785ab2c2","pw":false,"ef":["5a","5b","5e","45","56","45","56"],"ei":[4,0,3,2,5,6,1]},{"q":"The security event log retained ___ entries.","ht":"RIPEMD-160","diff":"Medium","hh":"929d81d4ea6cbf625cb75ed88cae896685d2f305","pw":false,"ef":["0f","0e"],"ei":[1,0]},{"q":"The security roadmap prioritizes implementation of ___ controls.","ht":"RIPEMD-160","diff":"Medium","hh":"b50e58fde1eab1dba145ba71208adbc7fbd6ee8d","pw":false,"ef":["5e","58","43","52","5f","40","5b"],"ei":[4,1,5,6,0,2,3]},{"q":"The attacker brute-forced the password after ___ attempts.","ht":"RIPEMD-160","diff":"Medium","hh":"fe9362e30831f55eeb1f0d837cd5f98848386ef9","pw":false,"ef":["06","06","07"],"ei":[2,0,1]},{"q":"Continuous ___ monitoring detects anomalies in user behavior.","ht":"RIPEMD-160","diff":"Medium","hh":"6e881828cec0398d1068c52a57f76d999a07388e","pw":false,"ef":["43","56","52","42","5c","59","5e"],"ei":[5,2,6,0,3,1,4]},{"q":"The security architecture includes ___ defense layers.","ht":"RIPEMD-160","diff":"Medium","hh":"382af1d98a2f4c1ffeb119d5a520796f33d7f3b8","pw":false,"ef":["07","05","06"],"ei":[1,2,0]},{"q":"The ___ standard provides guidelines for secure software development.","ht":"RIPEMD-160","diff":"Medium","hh":"d59e1ca2ebe9379b5085df0049d1650eaad38106","pw":false,"ef":["58","56","54","47","44","44","5e"],"ei":[6,3,2,0,4,5,1]},{"q":"The compliance report covered ___ regulatory requirements.","ht":"RIPEMD-160","diff":"Medium","hh":"d3dfa882ec7bdf09ee847dfc7bafbbe99424498f","pw":false,"ef":["07","04","06"],"ei":[1,2,0]},{"q":"Penetration testers used a custom ___ to exploit the deserialization flaw.","ht":"RIPEMD-160","diff":"Medium","hh":"5da1e71d1423f7169177c48746b914c8f24f6ed6","pw":false,"ef":["52","45","44","59","4d","58","52","43","55","56"],"ei":[1,3,5,8,0,7,9,6,2,4]},{"q":"The security assessment identified ___ findings total.","ht":"RIPEMD-160","diff":"Medium","hh":"5a223397df109f03f32200ea5444d4d19882cdd6","pw":false,"ef":["06","03","07"],"ei":[0,2,1]},{"q":"The security team conducted tabletop exercises for ___ incident response.","ht":"HAVAL-160","diff":"Medium","hh":"cb90495080ba33998a791c39bad18dc06a01d644","pw":false,"ef":["54","56","44","58","52","5f","44","47","4e","45","45"],"ei":[0,8,9,5,10,1,4,6,3,2,7]},{"q":"The malware propagation rate was ___ systems per hour.","ht":"HAVAL-160","diff":"Medium","hh":"3419df5f6cd5567eaa1a85abf60b1266c63c54ea","pw":false,"ef":["02","07","06"],"ei":[2,1,0]},{"q":"Encryption key rotation is essential for maintaining ___ security.","ht":"HAVAL-160","diff":"Medium","hh":"2adcd0f3c891a64fede8706237c01cf94c238469","pw":false,"ef":["45","5a","43","53","45","5e","52","58","42","43","5e","52"],"ei":[4,2,5,0,8,6,11,3,1,10,9,7]},{"q":"The security operations team works in ___-hour shifts.","ht":"HAVAL-160","diff":"Medium","hh":"4df2fad81e0730bfbcacb637e06489db29d872d5","pw":false,"ef":["06","07","01"],"ei":[0,1,2]},{"q":"The ___ analysis identified the root cause of the data breach.","ht":"HAVAL-160","diff":"Medium","hh":"0a2731b2b51673bbb7f901f679c8b55e9c2fb4ca","pw":false,"ef":["42","43","5b","43","5e","5f","52"],"ei":[2,5,3,0,4,1,6]},{"q":"The access review cycle covers ___ user accounts.","ht":"HAVAL-160","diff":"Medium","hh":"5c5ec543e038435c1218af96e0a3f2aeeb39f8b9","pw":false,"ef":["07","06","00"],"ei":[1,0,2]},{"q":"Zero-knowledge proofs enable verification without revealing the ___.","ht":"HAVAL-160","diff":"Medium","hh":"c138ea3c4350bab465b9c127fc11f4b64b3db2ba","pw":false,"ef":["54","44","45","5e","43","5e","41","56","52"],"ei":[5,4,2,6,7,3,0,1,8]},{"q":"The security baseline document contains ___ configuration items.","ht":"HAVAL-160","diff":"Medium","hh":"5a87b811d421d7f377a00c427c625666d45f4639","pw":false,"ef":["06","07","0e"],"ei":[0,1,2]},{"q":"The security policy mandates background checks for ___ administrators.","ht":"HAVAL-160","diff":"Medium","hh":"921b9e55fbc0f3d2578497dc62dd8cd10334a06e","pw":false,"ef":["5b","43","43","52","52","54","47","58","5e","44","45"],"ei":[7,9,4,2,10,3,1,6,8,0,5]},{"q":"The vulnerability scan completed in ___ minutes.","ht":"HAVAL-160","diff":"Medium","hh":"8bdb0997a4a18ca2acd7c3dca6c9c19daa5e6682","pw":false,"ef":["07","06","06"],"ei":[2,0,1]},{"q":"The ___ framework helps organizations measure cybersecurity maturity.","ht":"Tiger-160","diff":"Medium","hh":"5f929f466cb0c2c7e518e95af455044bd2b8ff03","pw":false,"ef":["58","40","55","45","56","59","5e"],"ei":[5,6,4,0,1,3,2]},{"q":"The threat hunting exercise covered ___ hypothesis scenarios.","ht":"Tiger-160","diff":"Medium","hh":"69761c4e68b99dd3a4be3ef0f68409eb557b924b","pw":false,"ef":["06","06","06"],"ei":[2,0,1]},{"q":"Advanced analytics detect subtle patterns of ___ data exfiltration.","ht":"Tiger-160","diff":"Medium","hh":"6cbb885b9e70d245665141b1b846abb6e241c6ac","pw":false,"ef":["52","59","5f","5c","43","5e","56","52","47"],"ei":[2,3,1,5,7,6,4,8,0]},{"q":"The security policy exception process requires ___ approval levels.","ht":"Tiger-160","diff":"Medium","hh":"afb2c99b23da471304cd903a86d6d371123156e5","pw":false,"ef":["06","06","05"],"ei":[0,1,2]},{"q":"The ___ review board evaluates proposed changes for security impact.","ht":"Tiger-160","diff":"Medium","hh":"d8e2db169c0449bc68b9d25028a2e34fd553d795","pw":false,"ef":["52","43","43","59","5e","52","55","58","5e"],"ei":[8,4,7,2,3,1,0,5,6]},{"q":"The incident post-mortem identified ___ lessons learned.","ht":"Tiger-160","diff":"Medium","hh":"98a8a8c9eee240ad914c7ae65b58c26a954e1cbb","pw":false,"ef":["06","06","04"],"ei":[0,1,2]},{"q":"Security champions advocate for ___ best practices in development teams.","ht":"Tiger-160","diff":"Medium","hh":"a8588623cbbb2576f5fb3413582e0af7fda67bed","pw":false,"ef":["50","56","5e","45","52","5e","43","52","59","53","5e","53","45"],"ei":[0,2,5,1,8,7,11,12,3,6,10,4,9]},{"q":"The security investment ROI was calculated at ___ percent.","ht":"Tiger-160","diff":"Medium","hh":"b01715f4b9c4f9106711ff45f57d410536d922af","pw":false,"ef":["06","03","06"],"ei":[0,2,1]},{"q":"The security analyst discovered that the attacker used a ___ to exfiltrate data.","ht":"Tiger-160","diff":"Medium","hh":"03bd4bff77bfd207d45e484debe5c220dc650a57","pw":false,"ef":["45","52","47","52","53","43","43","58","42","43","52","5e"],"ei":[4,8,0,11,3,7,10,1,2,6,5,9]},{"q":"The endpoint detection system uses ___ behavioral analytics models.","ht":"Tiger-160","diff":"Medium","hh":"c388b93df1b3a036357c85cfd741cbf4be437135","pw":false,"ef":["06","06","02"],"ei":[0,1,2]},{"q":"Our team deployed a new ___ detection system last quarter.","ht":"SHA-1","diff":"Medium","hh":"cff0badfbd8eb131bbe08535d3658f4bbb8437c6","pw":false,"ef":["43","56","59","47","5e","5e","52"],"ei":[5,1,3,0,4,2,6]},{"q":"The network firewall has ___ rule entries configured.","ht":"SHA-1","diff":"Medium","hh":"683e725c03a87baaad2623231644e944e537acab","pw":false,"ef":["06","06","01"],"ei":[1,0,2]},{"q":"The ___ vulnerability was assigned CVE-2024-0012.","ht":"SHA-1","diff":"Medium","hh":"d5d7e2b0eab4d5472e67ee9acbf23ea3baf8d08a","pw":false,"ef":["43","52","52","43","5e","51","51","56","56"],"ei":[7,8,5,0,6,4,3,2,1]},{"q":"The data loss prevention policy covers ___ data categories.","ht":"SHA-1","diff":"Medium","hh":"d0e2dbb0bac1917d360aaf52c01a2a4b669e8cdb","pw":false,"ef":["00","06","06"],"ei":[2,1,0]},{"q":"Penetration testers often use ___ techniques during red team operations.","ht":"SHA-1","diff":"Medium","hh":"e22a247779a3fe1d2ea28dcf5bf437cf3decd25c","pw":false,"ef":["52","43","5e","44","56","45","50","41","5a","42"],"ei":[9,8,7,2,5,4,3,6,0,1]},{"q":"The security monitoring generates ___ alerts per day.","ht":"SHA-1","diff":"Medium","hh":"12f0de3dc76e067d21ed85125716e02e9f1e69f0","pw":false,"ef":["0f","06","06"],"ei":[2,1,0]},{"q":"The malware was hidden inside a seemingly innocent ___ file.","ht":"SHA-1","diff":"Medium","hh":"a2b7cd6c6e1da9cd5285f7846faf310a45971c23","pw":false,"ef":["5e","52","45","5d","52","43","52","5a","41","52","5d","52"],"ei":[9,5,2,6,11,10,1,4,8,3,0,7]},{"q":"The risk register tracks ___ identified risks.","ht":"SHA-1","diff":"Medium","hh":"a2e33d344f272e100d4a8efeabc7ae8a60a8ba7a","pw":false,"ef":["06","06","0e"],"ei":[1,0,2]},{"q":"Encryption keys must be stored in a secure ___ vault.","ht":"SHA-1","diff":"Medium","hh":"f2f3dd2e149f53f28970ba4642c6cefb639b8295","pw":false,"ef":["5e","52","59","52","43","55","5e","45","44","52","53"],"ei":[6,1,4,10,9,7,8,2,0,3,5]},{"q":"The security architecture review addressed ___ design principles.","ht":"SHA-1","diff":"Medium","hh":"775bc5c30e27f0e562115d136e7f7edbd3cead89","pw":false,"ef":["07","06","05"],"ei":[2,0,1]},{"q":"Network administrators blocked the ___ protocol on port 3389.","ht":"SHA-224","diff":"Medium","hh":"d32503a81ba4376b0ac663dd6ecdd4d8a3a5e3ebaea4bdcf4a5a8c5f","pw":false,"ef":["44","43","5e","56","44","59","52","56","55","43"],"ei":[6,3,7,5,2,4,9,1,0,8]},{"q":"The penetration test report had ___ pages of findings.","ht":"SHA-224","diff":"Medium","hh":"1dc1c160284a5b1d5cbb04f6856c4c34806d33ceee7158b426821beb","pw":false,"ef":["05","06","06"],"ei":[1,2,0]},{"q":"The zero-day exploit targets the ___ component of the kernel.","ht":"SHA-224","diff":"Medium","hh":"2d574ab0174f9e317ffdb0582dbff3b02a72b2afb97fcd171c0d12c9","pw":false,"ef":["43","43","5e","5e","44","59","55","52"],"ei":[6,1,5,2,0,4,3,7]},{"q":"The security awareness training takes ___ minutes to complete.","ht":"SHA-224","diff":"Medium","hh":"794293b5706d6f85da86d164393511bb834cd222812a2016e68bb54c","pw":false,"ef":["05","06","05"],"ei":[1,0,2]},{"q":"A robust ___ policy is essential for enterprise security.","ht":"SHA-224","diff":"Medium","hh":"28a0522a3adcf915d1c2ce716a1071127a2412ef0495a8e825ff765f","pw":false,"ef":["59","45","56","54","55","59","56","5e"],"ei":[3,7,6,0,5,2,4,1]},{"q":"The threat intelligence feed provides ___ indicators of compromise.","ht":"SHA-224","diff":"Medium","hh":"78d8045d684abd2eece923758f3cd781489df3a48e1278982466017f","pw":false,"ef":["06","05","04"],"ei":[0,1,2]},{"q":"The forensic investigator recovered the deleted ___ from the disk image.","ht":"SHA-224","diff":"Medium","hh":"ad9a89110554d12a1aa9e43f9d12ed00b659972027e9b55daa7e1219","pw":false,"ef":["56","52","45","50","45","5b","56"],"ei":[2,1,0,4,6,3,5]},{"q":"The security incident involved ___ stolen credentials.","ht":"SHA-224","diff":"Medium","hh":"aca0ccb40a7b1b92a27d0767202f694db1488d4925eacc5838aa20d9","pw":false,"ef":["06","03","05"],"ei":[0,2,1]},{"q":"Security teams monitor the ___ for signs of compromise.","ht":"SHA-224","diff":"Medium","hh":"ab94c20d45d6df10d0349cd768e1f9923cec46dfc95c4a65491394ae","pw":false,"ef":["5a","59","45","52","47","43","5e","58"],"ei":[4,6,1,5,2,7,3,0]},{"q":"The vulnerability disclosure program received ___ submissions.","ht":"SHA-224","diff":"Medium","hh":"bb4a94cd430ccdce63146651fa502b28b960dc6279a61b8d85c8d795","pw":false,"ef":["05","06","02"],"ei":[1,0,2]},{"q":"The attacker escalated privileges using the ___ misconfiguration.","ht":"Whirlpool","diff":"Medium","hh":"e61e5a1d1a8190d8d04b4e62cebc9d089765f423ab00d1292592de213ff1e1a4efa6e369d63e61e90fa90bf239eeb42a95822c1e7f799189d5371f47c287c79e","pw":false,"ef":["4d","56","5e","43","45","42","52"],"ei":[1,0,4,5,3,2,6]},{"q":"The security tool deployment covers ___ percent of endpoints.","ht":"Whirlpool","diff":"Medium","hh":"42a060b155f406647c792867cac3b78e33feec7f0e445ef529a008bd3076d3f2535a32a9fd99572a99a1d61bbdfa8007bb3d5b631b1bfec2a74ee379cd3a47f3","pw":false,"ef":["06","05","0f"],"ei":[0,1,2]},{"q":"Multi-factor authentication prevents unauthorized access to the ___.","ht":"Whirlpool","diff":"Medium","hh":"0e46e4232e4ed7aa4f5944614145696e2a921cbc843f605de6548385fad1c2d1aa58fc3083f0738e711ffd21025dd0b4106dec34bd4a59cc6195aa474608ac11","pw":false,"ef":["5e","52","43","45","54","47","42"],"ei":[4,6,5,3,0,2,1]},{"q":"The encryption standard requires a minimum key size of ___ bits.","ht":"Whirlpool","diff":"Medium","hh":"b3ae29c9dacb0c04d91f10ded483de4a529010d8e20d6921d216489584e1392fc7ebb95dd9e4941709913eeef6310e5f826c1141212c33822a52754e83966a71","pw":false,"ef":["04","07","06"],"ei":[1,2,0]},{"q":"The company implemented a new ___ to comply with regulations.","ht":"Whirlpool","diff":"Medium","hh":"ad762c26b0cacef343289cdf75edca11a3554fb1755040fa3e33224a1bc65fe769964836433a93f54a56d9dce76481487f3255e6be833029d299e22648630a7b","pw":false,"ef":["5e","54","52","52","56","44","5e","44","43","43","45"],"ei":[8,0,10,6,1,2,4,3,9,5,7]},{"q":"The security assessment scope includes ___ applications.","ht":"Whirlpool","diff":"Medium","hh":"4a9362e509562eb05cd647b0107e7367221bc2982bb633c161956e825a4a21c9921e56a51755ba469a9848dcea3c470e8fcbcf3b81c8926552bf420504e59b18","pw":false,"ef":["04","02","06"],"ei":[1,2,0]},{"q":"Researchers demonstrated a ___ attack on the wireless network.","ht":"Whirlpool","diff":"Medium","hh":"12fc413d469822a8408f68b0a90d0bc7a2fb7938d03df09ab401dc99e3c55463012a20f930123e1e071b8d17ca77625769ff4bff145fb7d56a01e287c5218245","pw":false,"ef":["52","5e","44","5f","52","45","47","43","56","5b"],"ei":[5,7,0,2,9,6,1,8,3,4]},{"q":"The incident response drill simulated ___ attack scenarios.","ht":"Whirlpool","diff":"Medium","hh":"05c06c55c303c8caea361392f832c32942fdb6c56c23919c87e62a48be3f2c32fc06ee8fd363d617b115b4485b4265e3c885e92563adb30c8d3fd9b8c9982975","pw":false,"ef":["03","07","06"],"ei":[1,2,0]},{"q":"The security audit revealed weaknesses in the ___ architecture.","ht":"Whirlpool","diff":"Medium","hh":"ae295a7f7726d158d9f86e8fd056e1da136efbe7fa17410f49819e946bb9c23eecc6224de20c684e39e313abbe540276082f6b20c50a7fe186248b21a9899540","pw":false,"ef":["56","59","5b","50","52","56"],"ei":[1,4,2,0,3,5]},{"q":"The security baseline hardening guide has ___ recommendations.","ht":"Whirlpool","diff":"Medium","hh":"6efdca884456dfb2b05613b9a3391913f94ed031cec25428ae36c880abe8ee67335d3fbf9ac55f0034622a460484ebe295cfe96351484edadcfaab10e55b7165","pw":false,"ef":["06","04","03"],"ei":[0,2,1]},{"q":"Incident response procedures require logging all ___ events.","ht":"SHA-256","diff":"Medium","hh":"af3e3862e89ed6d2231714f34d4ad885e8f37158d3cc9ed5aece28d6b38f4dfa","pw":false,"ef":["47","4e","52","5e","45","43"],"ei":[0,1,5,3,2,4]},{"q":"The network monitoring captured ___ suspicious connections.","ht":"SHA-256","diff":"Medium","hh":"5ec1a0c99d428601ce42b407ae9c675e0836a8ba591c8ca6e2a2cf5563d97ff0","pw":false,"ef":["03","06","03"],"ei":[2,0,1]},{"q":"Advanced persistent threats often disguise themselves as legitimate ___ traffic.","ht":"SHA-256","diff":"Medium","hh":"9f1b28b8f58939447cf1af311805fa0806078f9e44de7b729136c5f9a851713d","pw":false,"ef":["50","5e","5a","43","43","56","59","52","52"],"ei":[2,6,0,5,7,1,3,4,8]},{"q":"The security governance committee meets ___ times per year.","ht":"SHA-256","diff":"Medium","hh":"9ae2bdd7beedc2e766c6b76585530e16925115707dc7a06ab5ee4aa2776b2c7b","pw":false,"ef":["07","06","02"],"ei":[2,0,1]},{"q":"The ___ module was patched in the latest security update.","ht":"SHA-256","diff":"Medium","hh":"2c54521451dd9b7f14147c606b4aa91a7ce517758d1acaebb4ede36cd06cbb9e","pw":false,"ef":["5a","43","5f","43","52","52","56","5e"],"ei":[2,4,0,6,1,7,3,5]},{"q":"The data protection policy covers ___ data processing activities.","ht":"SHA-256","diff":"Medium","hh":"210e3b160c355818509425b9d9e9fd3ea2e287f2c43a13e5be8817140db0b9e6","pw":false,"ef":["02","06","02"],"ei":[2,0,1]},{"q":"Cybercriminals used social engineering to bypass the ___ control.","ht":"SHA-256","diff":"Medium","hh":"1166a74d235ad6574ba3a8f9e500eef65c4a2c6d6c476468d2474b66f97d42ef","pw":false,"ef":["59","5a","43","52","52","5b","5e","5e"],"ei":[4,2,6,7,3,1,5,0]},{"q":"The malware analysis report documented ___ behavioral indicators.","ht":"SHA-256","diff":"Medium","hh":"a512db2741cd20693e4b16f19891e72b9ff12cead72761fc5e92d2aaf34740c1","pw":false,"ef":["06","01","07"],"ei":[0,1,2]},{"q":"The security framework mandates encryption of all ___ in transit.","ht":"SHA-256","diff":"Medium","hh":"b667c0c7071a6ddb6f8b067a0a99eeb92971c3ed23b866820dc0b3a8105215fb","pw":false,"ef":["5e","52","45","43","5b","42"],"ei":[3,5,0,2,4,1]},{"q":"The security certification requires ___ continuing education credits.","ht":"SHA-256","diff":"Medium","hh":"3d3286f7cd19074f04e514b0c6c237e757513fb32820698b790e1dec801d947a","pw":false,"ef":["06","04","01"],"ei":[0,2,1]},{"q":"Vulnerability scanners detected a critical ___ in the web application.","ht":"SHA-384","diff":"Hard","hh":"5b86e6d8c45be7038b43a0759160f9a9d2c0d863a6eba12c99c943194153547b151986bac665e15addb3154d093082cf","pw":false,"ef":["52","44","56","56","43","59","56"],"ei":[6,5,0,4,3,1,2]},{"q":"The threat actor\'s infrastructure spanned ___ countries.","ht":"SHA-384","diff":"Hard","hh":"bf0e8105ad41db274ca344fe9380be7dc9b133b860fb97a3f905a3491bd10ddf7f419934d31ccda3812b9304b9503da7","pw":false,"ef":["06","01","02"],"ei":[0,1,2]},{"q":"The honeypot captured the attacker\'s ___ command sequences.","ht":"SHA-384","diff":"Hard","hh":"f0157f8675c9c95b1569e5ee98605bc154a1f41c698662b19a5f81051f133c2e907488ee0ead651733893808e53d769c","pw":false,"ef":["45","5c","55","52","58","58","43","5e"],"ei":[1,4,0,7,2,3,6,5]},{"q":"The security control testing validated ___ control implementations.","ht":"SHA-384","diff":"Hard","hh":"0a47bb7553981866781e6c63356abea4281747870c13674fac698e6a9afa84a47f90a4577573d3b6328821ecdcbf5f94","pw":false,"ef":["01","06","0f"],"ei":[1,0,2]},{"q":"Secure coding practices prevent injection of malicious ___ payloads.","ht":"SHA-384","diff":"Hard","hh":"225f1fdf31055e227660be3d614d4eee65c45dc916d9f98cf098b945a22410d0f39a6617886ee2d66b01179a20d5db94","pw":false,"ef":["5a","5b","40","52","56","5e","43","51","45","58"],"ei":[6,2,0,9,5,7,8,3,4,1]},{"q":"The security awareness phishing simulation had ___ percent click rate.","ht":"SHA-384","diff":"Hard","hh":"7bcaf84d23c5eb5b51d6698ed46b5b3c5813c88cd86c9dd343a22ef392a664551ce04de560ee6ea2bc64a374c7a6c2a7","pw":false,"ef":["07","06","00"],"ei":[2,0,1]},{"q":"The ___ algorithm provides collision resistance for digital signatures.","ht":"SHA-384","diff":"Hard","hh":"813aeac44eaee7aae29d77b3eb8fab5506f3cebeea95d09ee31e6a411c252f3f3bdc3bff2fa0abc6f1389b70a36facfc","pw":false,"ef":["44","43","5b","52","52","54","52","5e","5f"],"ei":[0,7,5,8,4,1,3,6,2]},{"q":"The vulnerability management program remediated ___ issues this month.","ht":"SHA-384","diff":"Hard","hh":"d7106aada2d6f8aaf99932d21dc2eff2b0db0a8f8de3f29b7f7cd979ec7c24a2278c2f7515a0bf73598f66d089e7aa38","pw":false,"ef":["02","06","00"],"ei":[2,0,1]},{"q":"Endpoint protection software quarantined the suspicious ___ process.","ht":"SHA-384","diff":"Hard","hh":"264a7a943e94143accf3f1987b8c0b981b774a36dd26827d49b56347f947297f019afeee95b4dead84740cce8b95e69f","pw":false,"ef":["5b","55","56","52","54","43","43","58","5e"],"ei":[4,2,3,8,0,7,5,1,6]},{"q":"The security incident timeline spans ___ days.","ht":"SHA-384","diff":"Hard","hh":"c028ad24fea5af5d672d3f48e16ad3a8bf0a5ca4d99dc3cad04ba5f2537fc0481554cfa00a55011436a7c4a44d467a24","pw":false,"ef":["0f","06","07"],"ei":[1,0,2]},{"q":"The security operations center analyzed the ___ logs for anomalies.","ht":"SHA-512","diff":"Hard","hh":"c578e895b98d9b99fc804d2350f4dde15c0e508b34de0b3fc86a85d0e0c36f3e3ac89bdfe8a57f9d280cb367d8bfabe09fd3559dd47e4397cb80f5036779c2cf","pw":false,"ef":["52","45","56","52","44","47","5e","45","43","59","58","4e"],"ei":[3,1,0,11,2,6,9,8,10,4,5,7]},{"q":"The access control system manages ___ user identities.","ht":"SHA-512","diff":"Hard","hh":"831c58f83cbcdb1a9bbc88dd83942ed411b327ddb602b60f8f2d2b129910dd6b7c0b2caa54f3d24f3b84b56456898acadaa976bcb60314f3895657ed8ecc239a","pw":false,"ef":["02","0f","06"],"ei":[2,1,0]},{"q":"Threat intelligence feeds identified the ___ campaign targeting our sector.","ht":"SHA-512","diff":"Hard","hh":"366e59cd9d006f0680ef890f625b99b89e5bb02b4837f71020dff93106dede53d5116e0c9daa9524767b543c32b2cc0cca013f6d7d624ef68f94e63b9ee7a611","pw":false,"ef":["54","5f","52","54","58","4e","47","56","45","5b","5e","43"],"ei":[0,1,11,4,5,7,6,2,8,3,9,10]},{"q":"The security budget allocation for tools is ___ percent.","ht":"SHA-512","diff":"Hard","hh":"9ae8b598267c798e42ecb396b2586b5e41bf90de0c96e5083fb6f1e49c59f3d4ee309667f29e381f6baed68bfd964720e8f9a21f109f7ba01438177ef9dcaf77","pw":false,"ef":["06","0f","0f"],"ei":[0,1,2]},{"q":"Data loss prevention tools monitor the movement of sensitive ___ assets.","ht":"SHA-512","diff":"Hard","hh":"6fa040f776b37f624e534d29401df34a20c96248b66b016b508bbe96e934987665193c75255f942af58b71c90fa8d92be3d405b8db7af561f471e1138444bf58","pw":false,"ef":["43","52","58","45","5e","59","55"],"ei":[5,6,1,2,4,3,0]},{"q":"The security metrics dashboard tracks ___ key metrics.","ht":"SHA-512","diff":"Hard","hh":"fed283e2751ac7f2e57c4c79a73ba35ba45df1da9806e3eb11fde56385c753b7a4fd11886929de45bcee36924961b65824e5c6af9b5d2845cd3766a1f1314f20","pw":false,"ef":["07","0e","06"],"ei":[2,1,0]},{"q":"The penetration test report highlighted risks in the ___ configuration.","ht":"SHA-512","diff":"Hard","hh":"1749c945989ca482556d2cd8ec7b5e0c9dbeb90c421a89bf251a7f683ec8990b3a87bdc0d773f2b037f679d29fe64c5d910851f98d9481c8825389e2b638c3a0","pw":false,"ef":["41","5b","52","58","5b","54","43","52","5e"],"ei":[2,4,3,1,5,0,7,8,6]},{"q":"The network security device processed ___ connections per second.","ht":"SHA-512","diff":"Hard","hh":"cf1b881c8ec7355167290b18c4a4f8b39cab1875514e649ea0f313f210e227ef8330c0fd4ead855f80f02dd158f2e9195c948c5b8edc804b51cf3e36735965cf","pw":false,"ef":["06","05","0e"],"ei":[0,2,1]},{"q":"A robust ___ strategy mitigates the impact of ransomware attacks.","ht":"SHA-512","diff":"Hard","hh":"df3ea6544113b6d722dc573dcfc6774c5132f2d022dd212e58d5c9256be209f5d835a20145f36ec8efc39eedf0902a1e5d07b6b6f09e88a71e860d3114b5a241","pw":false,"ef":["43","54","5f","58","5e","5b","56","54","52","54"],"ei":[8,0,1,5,7,3,2,6,9,4]},{"q":"The security risk score ranges from ___ to 1000.","ht":"SHA-512","diff":"Hard","hh":"7a3dc8df4d8d7bd696f823eca286d72ef86ca176bffb84cf701ae6620247757a4fda28613043037d16b3970d2871461f60abb3944a936ad21538d1c27252d017","pw":false,"ef":["0e","02","06"],"ei":[1,2,0]},{"q":"The security team configured the ___ to filter malicious domains.","ht":"SHA-512/224","diff":"Hard","hh":"0d8dfcf575ccf04737b5758220d08893ae39a126e82951e95988e237","pw":false,"ef":["43","50","45","52","52","59","5e","56"],"ei":[6,4,3,0,7,1,5,2]},{"q":"The compliance audit covered ___ policy documents.","ht":"SHA-512/224","diff":"Hard","hh":"44ac41b5f8e5a3cb2a89dd3b780cc4b5490c83153219b6bda2f71fff","pw":false,"ef":["01","06","0e"],"ei":[2,0,1]},{"q":"Forensic analysis of the ___ revealed the attack timeline.","ht":"SHA-512/224","diff":"Hard","hh":"d8c7af6bdda4a1a99bb0d33400ba2eacb3a98d3817cb8b8b66a0eb3a","pw":false,"ef":["43","43","59","59","59","43","56","5e","52","52"],"ei":[8,6,2,3,5,0,4,7,9,1]},{"q":"The security patch deployment covers ___ systems.","ht":"SHA-512/224","diff":"Hard","hh":"d8eba556b09ceaf6d4397f35cb2c530da8263574f358bb9debf2b3ee","pw":false,"ef":["00","0e","06"],"ei":[2,1,0]},{"q":"The compliance officer reviewed the ___ handling procedures.","ht":"SHA-512/224","diff":"Hard","hh":"91806d9c00f476a7e22b4cde6692f3d9dfc66aef3eb2b67834f9da93","pw":false,"ef":["5f","43","53","45","43","45","52","56","52","52","43","5e"],"ei":[5,0,7,3,10,8,11,4,6,1,2,9]},{"q":"The security awareness module has ___ training videos.","ht":"SHA-512/224","diff":"Hard","hh":"80376efbc88468dd1102995f9d14ddc36ba1dc7cfb67294dd9c7b57a","pw":false,"ef":["0e","0f","06"],"ei":[1,2,0]},{"q":"Machine learning models help detect anomalous ___ patterns in network traffic.","ht":"SHA-512/224","diff":"Hard","hh":"83d7be1931452fced2707cacd93dfebadad69074a1c6599ca8b8297b","pw":false,"ef":["43","44","45","42","5e","58","43","52","47"],"ei":[7,4,1,3,6,2,5,8,0]},{"q":"The incident response plan has ___ procedural steps.","ht":"SHA-512/224","diff":"Hard","hh":"3bcda22facbef1c169a4e855fcd9ff0ac31f3da2fcca204951f5c2a5","pw":false,"ef":["06","0e","0e"],"ei":[0,1,2]},{"q":"The ___ framework provides a structured approach to risk assessment.","ht":"SHA-512/224","diff":"Hard","hh":"b0d1f0f802ac4277430a462835a1668da0b7253509b4e3535fb902d5","pw":false,"ef":["47","4e","43","56","45","4e","50","45","52","5e","45"],"ei":[0,1,9,3,4,6,5,7,10,8,2]},{"q":"The security assessment methodology includes ___ phases.","ht":"SHA-512/224","diff":"Hard","hh":"3ab95b7a8e788018a39f693ffb107ebafd958aaa4ccdfd499d57f6c5","pw":false,"ef":["05","06","07"],"ei":[0,2,1]},{"q":"Security awareness training covers the dangers of ___ phishing attacks.","ht":"SHA-512/256","diff":"Hard","hh":"67b5d0479e02f0e13acc49e57d91c3f525fa88bc9148dd9dee3ea171cb5e5cf1","pw":false,"ef":["5f","44","5e","59","56","52","52","43","47","43"],"ei":[4,0,7,6,5,2,9,1,3,8]},{"q":"The threat intelligence analysis covered ___ adversary tactics.","ht":"SHA-512/256","diff":"Hard","hh":"ac9f4142be3e2318caae3f8a548cd424e7b15c71588d8958f397ca0d2ef48e4c","pw":false,"ef":["05","05","07"],"ei":[2,0,1]},{"q":"The incident commander coordinated the response to the ___ breach.","ht":"SHA-512/256","diff":"Hard","hh":"b399aa2ac44bace10cee3acf65dd732ac72ec33e00b69f7d414125141ecd6939","pw":false,"ef":["45","52","4e","52","45","56","43","50","45","5e","54"],"ei":[7,1,6,10,4,3,9,5,2,8,0]},{"q":"The security program maturity level is ___ on a 5-point scale.","ht":"SHA-512/256","diff":"Hard","hh":"8cc126f4c1b4c34552e2158f4d40891dcae7d4322fc8778947f2e5e0ea9748e6","pw":false,"ef":["05","04","07"],"ei":[0,2,1]},{"q":"Encryption at rest protects the ___ database from unauthorized access.","ht":"SHA-512/256","diff":"Hard","hh":"9fa365bd18cc24b7900e8add9c6d8e452b1518dfb390d3b62d223fbdd493bf04","pw":false,"ef":["43","45","5a","59","50","44","58","56"],"ei":[4,5,7,1,2,3,6,0]},{"q":"The vulnerability prioritization considered ___ risk factors.","ht":"SHA-512/256","diff":"Hard","hh":"68cd5f8edba33eabd6785d407f8c61850b6574a08d4ff400bc42d12b3828c315","pw":false,"ef":["03","07","05"],"ei":[2,1,0]},{"q":"The red team exploited a ___ vulnerability to gain persistence.","ht":"SHA-512/256","diff":"Hard","hh":"6268e15ad371f14d6b58b890473081534edf8542e4adee166b92484f13af8f7e","pw":false,"ef":["52","55","59","56","42","5b"],"ei":[1,2,0,5,3,4]},{"q":"The security tool integration connects ___ data sources.","ht":"SHA-512/256","diff":"Hard","hh":"2a854402224c648e18c85c15475c02828668dea6473bde99edf5c0769c6dbcfa","pw":false,"ef":["05","07","02"],"ei":[0,1,2]},{"q":"Blue team defenders implemented new rules to detect ___ activity.","ht":"SHA-512/256","diff":"Hard","hh":"6a7d5b63ee161837ef4d06f9d7ac7aafaa646a9ddc88626512ca2f1b9e192d6a","pw":false,"ef":["45","52","54","47","5e","5f"],"ei":[5,4,0,2,1,3]},{"q":"The security incident affected ___ business units.","ht":"SHA-512/256","diff":"Hard","hh":"2623be76ac51a28e434b7e71e6d41377b36767c098b964faf46f615d8ab95e14","pw":false,"ef":["07","05","01"],"ei":[1,0,2]},{"q":"The security policy requires annual review of ___ access controls.","ht":"SHA3-224","diff":"Hard","hh":"1ec1438acd6bf62f90b8e3935ee418fd44d31422a04f8ed6abdb25ae","pw":false,"ef":["5a","45","56","43","4f","5e"],"ei":[0,3,1,2,5,4]},{"q":"The data backup schedule runs every ___ hours.","ht":"SHA3-224","diff":"Hard","hh":"7968d31efb6d65c8915dfe6320484bba28e308874eecf2235bc2456e","pw":false,"ef":["00","05","07"],"ei":[2,0,1]},{"q":"Threat hunters proactively search for indicators of ___ compromise.","ht":"SHA3-224","diff":"Hard","hh":"615015cc658731a704f65b6447404c1f351bd49df993aa525e28cd5a","pw":false,"ef":["42","58","43","45","52","59","59"],"ei":[2,5,3,4,1,0,6]},{"q":"The security policy requires ___-character minimum passwords.","ht":"SHA3-224","diff":"Hard","hh":"d043d55ce2ab3f780cc3fe2048809f2fb201d109f8bb8abdf7382f92","pw":false,"ef":["05","07","0f"],"ei":[0,1,2]},{"q":"The ___ standard defines requirements for information security management.","ht":"SHA3-224","diff":"Hard","hh":"09e4d1268711ca373d1f5ad344d75a2d243244276d389a40b55a7d24","pw":false,"ef":["47","5f","59","58","43","58"],"ei":[0,1,5,2,3,4]},{"q":"The penetration testing scope includes ___ target systems.","ht":"SHA3-224","diff":"Hard","hh":"cff35b2b5f520fda13318128443a2dbf96c798c3bc2629f1652ade3e","pw":false,"ef":["0e","07","05"],"ei":[2,1,0]},{"q":"Security architects designed a zero-trust ___ for the hybrid cloud.","ht":"SHA3-224","diff":"Hard","hh":"022c0000348dbec7bfd4239b4e379bff73cc880dd1915b8d9d195775","pw":false,"ef":["42","56","59","43","5a","42","46"],"ei":[5,2,3,4,6,1,0]},{"q":"The security review identified ___ improvement opportunities.","ht":"SHA3-224","diff":"Hard","hh":"cc945feebbee5e0c63eb88ae9f55c3c05a67ccee153b543e80fcbd61","pw":false,"ef":["05","07","06"],"ei":[0,2,1]},{"q":"The vulnerability management program prioritizes remediation of ___ flaws.","ht":"SHA3-224","diff":"Hard","hh":"06e46aa938ccf0377df15a6bf7c1df516382f59adb789cd99ed134f3","pw":false,"ef":["56","56","5a","47","44","5b"],"ei":[5,2,4,0,3,1]},{"q":"The threat modeling exercise identified ___ threat agents.","ht":"SHA3-224","diff":"Hard","hh":"8be5abbaba0620f421d011e96fb0f735803767c853daef15600d9df5","pw":false,"ef":["06","02","05"],"ei":[1,2,0]},{"q":"Digital forensics experts recovered encrypted ___ from the seized devices.","ht":"SHA3-256","diff":"Hard","hh":"95776985c747069fcc284c68dc1064814bf45f785d9bf971d88db4b8a4317754","pw":false,"ef":["41","45","58","54","52","43"],"ei":[0,5,4,2,1,3]},{"q":"The security monitoring retention period is ___ days.","ht":"SHA3-256","diff":"Hard","hh":"f0ed58d0e4cab00c8ec4e82102132f1ba552dfaf74893d66672d0299638658ee","pw":false,"ef":["05","07","05"],"ei":[0,2,1]},{"q":"The ___ protocol ensures integrity of data in transit.","ht":"SHA3-256","diff":"Hard","hh":"d175dd2bc3644c0546e52ac4c25be3069d5ae7edb57d59d690b3861c0270f495","pw":false,"ef":["52","45","58","59","43","44"],"ei":[1,5,4,2,0,3]},{"q":"The network access request was ticket number ___.","ht":"SHA3-256","diff":"Hard","hh":"5b3fe4056a42f4500004a191dabe440143c9c20b86fcfb43ad6bae3ab8dfa9f2","pw":false,"ef":["02","05","05"],"ei":[2,1,0]},{"q":"Penetration testers chained multiple ___ exploits to achieve domain admin.","ht":"SHA3-256","diff":"Hard","hh":"f215fe4ef1f96c72b48530f812c56d1011d11ff284adb11341ea1ddcf3d02275","pw":false,"ef":["45","58","58","59","47","43"],"ei":[1,2,4,5,0,3]},{"q":"The security awareness completion rate is ___ percent.","ht":"SHA3-256","diff":"Hard","hh":"8a6533d1090f074499c0e572d128c4d8811b1d6fe229da26246393351d101b75","pw":false,"ef":["05","07","04"],"ei":[0,2,1]},{"q":"The security dashboard displays real-time ___ metrics.","ht":"SHA3-256","diff":"Hard","hh":"2c446b4cf2bf5a220a3a9b272770d8b60c41b69e65554126ab027b6adb56faa7","pw":false,"ef":["58","58","44","59","55"],"ei":[1,3,2,4,0]},{"q":"The security control framework maps to ___ compliance standards.","ht":"SHA3-256","diff":"Hard","hh":"9d562fabe9290928265f25a1781e2962e579d98ca9e0df7c197a305c1f29e5cf","pw":false,"ef":["05","02","04"],"ei":[0,2,1]},{"q":"Access control lists restrict ___ permissions to authorized personnel.","ht":"SHA3-256","diff":"Hard","hh":"e272d2d40a8af6f31a5b336c2ebde6c80a500dca8fc1178d4ed93d119ab4d143","pw":false,"ef":["45","5e","5a","59","51","58","52"],"ei":[2,4,3,6,0,5,1]},{"q":"The vulnerability scan detected ___ hosts with critical issues.","ht":"SHA3-256","diff":"Hard","hh":"edf799e092c158218b6cefd36e41ef8cf5bfba20d67763700d433a84fbe9a50f","pw":false,"ef":["03","05","07"],"ei":[1,0,2]},{"q":"The malware sandbox analyzed the behavior of the ___ payload.","ht":"SHA3-384","diff":"Hard","hh":"fda1ae0d3d9e76425cb92a985096de4c85a3929962af844a3c6fccbdd531ad9589c37e99f943eea2a4495e614ab523b4","pw":false,"ef":["46","42","56","5c","45"],"ei":[0,1,2,4,3]},{"q":"The incident response tabletop exercise had ___ participants.","ht":"SHA3-384","diff":"Hard","hh":"3bec80e55a80816cd8f95aab92dbbbfea77a49d97a7c01cd7773fa99b885636f5ba66a6a120ab898edfe0bc4faf0fa88","pw":false,"ef":["02","05","03"],"ei":[2,0,1]},{"q":"Security researchers published a detailed ___ analysis on their blog.","ht":"SHA3-384","diff":"Hard","hh":"08465834e9e577201a4530de1dc0958fa5c5c27630296d2e343b77bd7f7b7169f2b1ddf797102a927c00aefc288a5918","pw":false,"ef":["58","42","5b","59","50"],"ei":[3,2,1,4,0]},{"q":"The security architect designed ___ network zones.","ht":"SHA3-384","diff":"Hard","hh":"20ea611d3370c7e705a810c0fdc024f219b580999fafbc56dc3a4139484b0b4943e5bd1ee3629421fe9347e5da7ba5c1","pw":false,"ef":["05","02","07"],"ei":[0,1,2]},{"q":"The ___ mechanism prevents replay attacks in authentication protocols.","ht":"SHA3-384","diff":"Hard","hh":"cf02ada2b1dd4698dbe36480a0abd5ba1f43089abaaba80908253deb23f5c2a68aeb9cd9c16f535db250a929294ca606","pw":false,"ef":["59","58","5a","44","52"],"ei":[4,3,0,2,1]},{"q":"The malware signature database contains ___ entries.","ht":"SHA3-384","diff":"Hard","hh":"fe13685f2bd955f268c88f7329e355f2f8c99cc2e8f6af80813684e5a41c033bf0910a68184e7dc4e7d54ce9d62afdf2","pw":false,"ef":["02","02","05"],"ei":[1,2,0]},{"q":"Network segmentation isolates the ___ zone from the production network.","ht":"SHA3-384","diff":"Hard","hh":"aa0281c05bccd7c93c14a08e915a8eb3765d5cd50792faa2b5c4b5489cd8a19601dc4d791a52e0f253fee459e3da5114","pw":false,"ef":["56","58","5f","53","45","59"],"ei":[1,4,0,2,3,5]},{"q":"The security operations on-call rotation covers ___ shifts per week.","ht":"SHA3-384","diff":"Hard","hh":"fbde3c3462a9ef5002dd93cb1b92652b8e37299c1b12c64ff34f2983e422aa8fc02f0a4ddcf489f9b68dd5d9b3f0de8b","pw":false,"ef":["07","05","01"],"ei":[2,0,1]},{"q":"The security engineer configured rate limiting on the ___ endpoint.","ht":"SHA3-384","diff":"Hard","hh":"5dd641e572e868e221ae3c4d0390993096b8788cd912c02eb1f3d49f970ed26c38b6549eb4be9398de2babcaf2ab8a3f","pw":false,"ef":["47","58","59","5b","52","43"],"ei":[2,4,5,0,1,3]},{"q":"The security assessment evaluated ___ technology domains.","ht":"SHA3-384","diff":"Hard","hh":"8edc195e1a7e009ae3bbea482c857a877b8dbe269009cc09f8d1adbe971b342cc9c7f915f14dc4271628e485dfe3d9b7","pw":false,"ef":["01","05","02"],"ei":[1,0,2]},{"q":"Threat modeling identifies potential ___ attack vectors early in development.","ht":"SHA3-512","diff":"Hard","hh":"0487a728e62db68d2ad0a6fb135aacea16329339d860088ed2c2538e21595637daca0d42cd8737e0a4e76699a87d8732e185c632444a8b775fdabad9c00808ad","pw":false,"ef":["52","47","43","58","44","5e","58"],"ei":[6,5,3,4,1,0,2]},{"q":"The threat intelligence subscription provides ___ curated feeds.","ht":"SHA3-512","diff":"Hard","hh":"b228034e281addd038e325655c842e2c39ad5b2da55881d6598eedc23190cc86e4b0bebd5ab8e3f705149ff33d89d6cd2512f58cd7a2a7e2e785ea8dff17237b","pw":false,"ef":["05","00","07"],"ei":[0,1,2]},{"q":"The ___ cipher suite provides forward secrecy for TLS connections.","ht":"SHA3-512","diff":"Hard","hh":"37b958a8c25db494d70ebe746e0fbd756d50c263c5a9d7d2330ee9e3679bf5b11d2fdfeda10c2cb2b711e148ea8ed894eda0ec6638541071348ea3576dcdfc43","pw":false,"ef":["5e","45","43","59","52","42","58","59"],"ei":[5,4,3,6,1,2,7,0]},{"q":"The security certification audit had ___ audit findings.","ht":"SHA3-512","diff":"Hard","hh":"d5f5dc8b67f06745a7633df18efa754a0624dd8c207cbf6c95945fcc44f3be58e2a47d320bc45af07454a4e6f714f7b3f20874a5ca40a594acdbebdd1910af05","pw":false,"ef":["02","00","05"],"ei":[2,1,0]},{"q":"Log correlation helps security analysts detect stealthy ___ intrusions.","ht":"SHA3-512","diff":"Hard","hh":"e9f78a1c07dd73bf1757675fbaf1861e8547651878dca8aa716feb3b1d0446d5809223119b288be00166b77cc2fecb4ff7dcd3c39959328c6a989abce459f1fd","pw":false,"ef":["59","43","44","47","58","5e","58","45"],"ei":[7,4,2,0,1,3,6,5]},{"q":"The network security posture score is ___ percent.","ht":"SHA3-512","diff":"Hard","hh":"583ef128219c7e35bfaf3cbd8fcd720069d6e3deb0db2ff6c831afe7db51e994b4946ba7a16e7262a7dbb4520e6b1c764bce5d1476cdb8686b15355ffea0aad5","pw":false,"ef":["07","05","0f"],"ei":[2,0,1]},{"q":"The vulnerability disclosure policy governs reporting of ___ issues.","ht":"SHA3-512","diff":"Hard","hh":"edbf0ecc73a5e63ec8dac4b909ac11320ac6289b222ce3f3b5e1de79edd9f2ac8467d50ee83f0d1b55672225786eea82ed6433007ba2f7289c1b6354e12f5aa7","pw":false,"ef":["58","56","59","4e","5f","43","54"],"ei":[5,1,6,4,3,0,2]},{"q":"The security awareness training achieved ___ percent completion.","ht":"SHA3-512","diff":"Hard","hh":"b1eacb4a9834b00b9eecce957cc8b8c647f35d6783da82367c75aec82def48b60b03157f8d357db2005647fc913bbad064d5977749198e9e032cd47c1e1c3fa6","pw":false,"ef":["05","0f","02"],"ei":[0,1,2]},{"q":"Cryptographic ___ ensures confidentiality of classified communications.","ht":"SHA3-512","diff":"Hard","hh":"b99b141128805a7202ad9788092114f648287c955a338ed03d35009fd1aeaf897d79257693efdc63f02f12a1b334db31e43449a1f5204574de5bc21876f66b70","pw":false,"ef":["50","59","43","56","58","45","5e","41"],"ei":[0,7,5,2,6,1,4,3]},{"q":"The data classification scheme has ___ classification levels.","ht":"SHA3-512","diff":"Hard","hh":"c0b2b4d75af93730dea14cce41394b2d7720781142cf42f6044fc2de68104155215c8156808bae4f623074c7424c59c5ccd340eedae170a6f12ad91da2192233","pw":false,"ef":["07","05","0e"],"ei":[2,0,1]},{"q":"The security awareness program educates employees about ___ risks.","ht":"BLAKE2s","diff":"Hard","hh":"c283f1093841ec152e26ac10438839b9da0ce00a4cf99b37f5175fcab4ea2602","pw":false,"ef":["59","5e","58","4f","56"],"ei":[4,2,3,1,0]},{"q":"The vulnerability disclosure timeline is ___ days.","ht":"BLAKE2s","diff":"Hard","hh":"2b83fec236cac61cdc7be9cd1fceb6894e9d108c08f434c4bd8faaec9b09bbf6","pw":false,"ef":["05","02","0e"],"ei":[0,2,1]},{"q":"The ___ scanner detected outdated software on the workstation.","ht":"BLAKE2s","diff":"Hard","hh":"58093eac8717f722d97c8ed8cecb62ae0920cf490335f8372698720e04cd23be","pw":false,"ef":["59","59","4e","56","58"],"ei":[4,1,2,0,3]},{"q":"The attacker\'s port scan revealed ___ open services on the target.","ht":"BLAKE2s","diff":"Hard","hh":"6eff5bfebf54c378dd582e96d178cea83039115648d8bd7324729e5271d84bb3","pw":false,"ef":["07","04","06"],"ei":[1,0,2]},{"q":"Incident responders isolated the compromised ___ to prevent lateral movement.","ht":"BLAKE2s","diff":"Hard","hh":"5b11482789deeb720636e1fc52b79e96c6dcdcfce7fc366fc52e8e047e0e59ef","pw":false,"ef":["58","59","5c","5b","52","43","47"],"ei":[5,6,3,1,2,4,0]},{"q":"The security team identified ___ vulnerabilities in the quarterly assessment.","ht":"BLAKE2s","diff":"Hard","hh":"1906196234dd2c7ae358666ac259634336d1eb72e953d22383a81097c859a262","pw":false,"ef":["04","07","05"],"ei":[0,1,2]},{"q":"Security metrics track the effectiveness of ___ controls over time.","ht":"BLAKE2s","diff":"Hard","hh":"ff5a2067f7b59f8d1cf7496e23607907d154f8251c9afdfa475024514ba8db92","pw":false,"ef":["44","58","4e","5c","59","5e","5a","45"],"ei":[0,6,2,1,7,5,4,3]},{"q":"Incident response SLA requires acknowledgment within ___ minutes.","ht":"BLAKE2s","diff":"Hard","hh":"9343a87e516d4ce95551a2069802238f568c8d015fe9aea250b0156044d872bd","pw":false,"ef":["04","04","07"],"ei":[0,2,1]},{"q":"The ___ assessment evaluated the organization\'s cybersecurity posture.","ht":"BLAKE2s","diff":"Hard","hh":"0a689c584e290b6c81d132850a875052fcc8e51673b11fbfb94ccf194c30bf99","pw":false,"ef":["5e","47","40","44"],"ei":[1,3,0,2]},{"q":"The encryption key length must be at least ___ bits for compliance.","ht":"BLAKE2s","diff":"Hard","hh":"24d2705e1d610877b7ef5eccc0e96505ee2994156d55a38faf7941e757a6a7c5","pw":false,"ef":["06","04","07"],"ei":[1,0,2]},{"q":"Secure configuration baselines harden the ___ against common attacks.","ht":"BLAKE2b","diff":"Hard","hh":"c9c75ddc94cd1a2a8ec84c1d806c29e21a586c295f8b332e454a4a1ab405c09155c591073f38217361a90262b3dd9f21eb1b8cb6f5a84462530b6c125ce75ca8","pw":false,"ef":["50","5e","56","5a","59","52"],"ei":[3,2,5,4,1,0]},{"q":"The malware communicated with ___ distinct command-and-control servers.","ht":"BLAKE2b","diff":"Hard","hh":"32ff529e90c5b59046040a2116a8ae03a32f20328eca1f410f7d413b11626fceb6acbded2e418c31ce9cebcdc1dc5f2b5d2d6791cf97b3bb88a44ce1c0840922","pw":false,"ef":["07","05","04"],"ei":[2,1,0]},{"q":"The malware used ___ obfuscation to evade signature detection.","ht":"BLAKE2b","diff":"Hard","hh":"1e16b63fa752db3e67eb63b3bde74cd3e60141d0986e09dfb58aa0cbd36848d9c99ac783416c5225e856affc55c94b77204dde20167cd2c6361c19180ceab520","pw":false,"ef":["4d","52","4d","5b","47","42"],"ei":[3,5,2,4,0,1]},{"q":"Password policy requires a minimum of ___ characters.","ht":"BLAKE2b","diff":"Hard","hh":"2fc7c4750566142fabec8a567d90600b9183eba858c00c7077eff0ccf07545c476302aa26f42e5aae72d026ad6ee93f58d1c5c5bbba2f513a33a49e2ce6a43cf","pw":false,"ef":["04","04","07"],"ei":[0,1,2]},{"q":"Security governance ensures accountability for ___ risk management.","ht":"BLAKE2b","diff":"Hard","hh":"cb55dd066f75113e1adf683e71f28dfc8d6f4602c260f89ec3f69bcd0ab66ac43c617034a04cb5f2097dc844055a176ab3d564bc36fd2b8dbf1a368bd554f170","pw":false,"ef":["53","5e","45","53","52","5b"],"ei":[3,1,0,2,5,4]},{"q":"The DDoS attack peaked at ___ gigabits per second.","ht":"BLAKE2b","diff":"Hard","hh":"eb6c54d9195a3381dd9b74a8b090129e620d7e7c39748eb6000cbae0b6a3f7eda62fc0ac160e575433ecdec768e44bb0ab1045faacc4d21faa7b8ed3d5493513","pw":false,"ef":["03","07","04"],"ei":[1,2,0]},{"q":"The ___ tool automates the discovery of security misconfigurations.","ht":"BLAKE2b","diff":"Hard","hh":"0f776ac8d3d78bf71cd3e7d5225b500afb74e5705161086cbb345740303e17a7038229d45e05d1b9e76113adfc9013b6333e485167e9d14679cedf00eacc3d86","pw":false,"ef":["44","52","45","4e","43","4e","5a"],"ei":[2,4,5,6,3,1,0]},{"q":"The security audit scored the organization ___ out of 100.","ht":"BLAKE2b","diff":"Hard","hh":"8917ec89a6567800d6c3d3649a7f0b97a99fe0699a96f54a4b31eaec268f81275b1d3cc995a744f4d08166c68a016f65388357f511c5d57aac02cd5ca7320344","pw":false,"ef":["04","07","02"],"ei":[0,2,1]},{"q":"Threat intelligence platforms aggregate indicators of ___ compromise.","ht":"BLAKE2b","diff":"Hard","hh":"2bc9b9af1de89c35a60a99158ab13f90a6f85729f2e1abdf3caf266c5cb4b225e220cf710d960021058e111d5bbeedbc34a722ce9df313e0c34a0552afaec276","pw":false,"ef":["56","53","56","58","47","45","4f"],"ei":[1,4,3,5,0,2,6]},{"q":"The firewall blocked ___ malicious connection attempts last month.","ht":"BLAKE2b","diff":"Hard","hh":"a0032095538d4bd60c0f61060dee29672a442e438282e832a8edfab9a5637de34fa5efedc7611a9350d7da812c4e9845f1b3617645020a5aee5a75d9f21fe77f","pw":false,"ef":["01","04","07"],"ei":[1,0,2]},{"q":"The security roadmap prioritizes implementation of ___ controls.","ht":"BLAKE3","diff":"Hard","hh":"7c7df290938fc7e5f6e282270aa099b3240a751138c780b975b39954776d2d78","pw":false,"ef":["59","4e","55","5e","5b","5f","43","56","45"],"ei":[6,3,2,5,0,8,7,1,4]},{"q":"The ransomware demanded ___ Bitcoin for the decryption key.","ht":"BLAKE3","diff":"Hard","hh":"566e7ad3aaeed295b563a5e56ace3ed5be118e3398c0c7512443fccc2ea1e1df","pw":false,"ef":["04","00","07"],"ei":[0,1,2]},{"q":"Continuous ___ monitoring detects anomalies in user behavior.","ht":"BLAKE3","diff":"Hard","hh":"17af5a3e609f6604bc9e1cbc65e515bca2a7d703e1a3a9a5eeb4709d9011b6d0","pw":false,"ef":["52","47","58","5e","59","4f","5f"],"ei":[3,0,2,5,4,6,1]},{"q":"The penetration test discovered ___ critical severity findings.","ht":"BLAKE3","diff":"Hard","hh":"0a286ab6ab02192de1762bdacf1939576d55d28f0b1890e3c0a4b75a351c1098","pw":false,"ef":["04","0f","07"],"ei":[0,1,2]},{"q":"The ___ standard provides guidelines for secure software development.","ht":"BLAKE3","diff":"Hard","hh":"47d2d3d38ff451b45b5bb0228025ab3cf81d4e5df3097342160d50ead0cf5062","pw":false,"ef":["52","45","5c","56","5c","59"],"ei":[4,1,3,2,0,5]},{"q":"The security training completion rate reached ___ percent.","ht":"BLAKE3","diff":"Hard","hh":"b73fd56eeb2148992305671c70acf26ebaf59026036e70154f0439bc91ed9b06","pw":false,"ef":["04","0e","07"],"ei":[0,1,2]},{"q":"Penetration testers used a custom ___ to exploit the deserialization flaw.","ht":"BLAKE3","diff":"Hard","hh":"2c976da2027c58b68a79f2df86add5beecd2ac8a0d3da19e68f3a73ca43b121c","pw":false,"ef":["53","45","56","4e","5f"],"ei":[2,3,4,1,0]},{"q":"The certificate expires in ___ days and needs renewal.","ht":"BLAKE3","diff":"Hard","hh":"0fe2bdd796ac6c5ce704f545d794fde42c5a1627ae21c58f90f6ba95c30e596d","pw":false,"ef":["03","07","06"],"ei":[0,1,2]},{"q":"The security team conducted tabletop exercises for ___ incident response.","ht":"BLAKE3","diff":"Hard","hh":"bf54debfd8cd5cf296b2df00093eca2f90eae8ba806b6a27bbb8b0ef8d8215cc","pw":false,"ef":["54","5e","56","5a","52","5f","45"],"ei":[0,2,6,3,4,1,5]},{"q":"The database contained ___ encrypted customer records.","ht":"BLAKE3","diff":"Hard","hh":"f469e1a9c05d74c337f6f6e0581fc93f0ba7dfa856f3bc44e42662a228d8e04c","pw":false,"ef":["03","07","05"],"ei":[0,1,2]},{"q":"Encryption key rotation is essential for maintaining ___ security.","ht":"Skein-256","diff":"Hard","hh":"c353adaec477765eb6d6b02e01976324623b34cc18a8277bcb1dadf9a6adc139","pw":false,"ef":["56","55","5b","44","44","5c","5e","5e"],"ei":[1,0,4,2,6,7,3,5]},{"q":"The authentication system supports ___ factor authentication.","ht":"Skein-256","diff":"Hard","hh":"6f76878ee2cdfd885a88547ddff5ad1d8f971b6f040883c5f11cc39f26a801e8","pw":false,"ef":["07","03","04"],"ei":[1,0,2]},{"q":"The ___ analysis identified the root cause of the data breach.","ht":"Skein-256","diff":"Hard","hh":"266da42b969bed83490842e5521d51ebca4b22b8e6e3ed11ded9b35109cbb3e3","pw":false,"ef":["50","59","58","45","58","50"],"ei":[0,5,1,2,4,3]},{"q":"The security incident was assigned priority level ___.","ht":"Skein-256","diff":"Hard","hh":"95ea6b5f86b77f2333ac06db574bf2058617d3b6d3b0b97a89184172d881030b","pw":false,"ef":["03","03","07"],"ei":[0,2,1]},{"q":"Zero-knowledge proofs enable verification without revealing the ___.","ht":"Skein-256","diff":"Hard","hh":"d68acb9f71e7b1fc51d212d67596fc084824cea6c77834d9db5fc7645a5b884d","pw":false,"ef":["47","59","5e","5f","4f","44"],"ei":[1,4,3,2,5,0]},{"q":"The vulnerability scanner checked ___ hosts in the network.","ht":"Skein-256","diff":"Hard","hh":"50d89ea9e8a9399a7f67d439fc8bc77119b11643261e5770789fd66a61832c50","pw":false,"ef":["07","03","02"],"ei":[1,0,2]},{"q":"The security policy mandates background checks for ___ administrators.","ht":"Skein-256","diff":"Hard","hh":"1c3b035ec7d5be397562abf63fd5548cefeb27dd705f8a543266008e0dd82d91","pw":false,"ef":["56","42","58","45","5e","59","5a","43"],"ei":[5,6,3,7,1,2,0,4]},{"q":"The log retention policy keeps records for ___ days.","ht":"Skein-256","diff":"Hard","hh":"fd11ee328ec86f224c54fa49e1b8a6451bc9a62054cd87ca842f73aff752fdba","pw":false,"ef":["03","06","07"],"ei":[0,1,2]},{"q":"The ___ framework helps organizations measure cybersecurity maturity.","ht":"Skein-256","diff":"Hard","hh":"183ac4f4c8846b490b80eaf989286bf2d8c1a9154b8acab599989658f6d44b6e","pw":false,"ef":["56","50","47","52","42","44","44"],"ei":[3,2,0,1,5,6,4]},{"q":"The security team received ___ alerts during the holiday season.","ht":"Skein-256","diff":"Hard","hh":"0fb9529208cec2d99a638b325db3a8ce38b21135d1d6497a51ba98577951812a","pw":false,"ef":["03","07","05"],"ei":[0,2,1]},{"q":"Advanced analytics detect subtle patterns of ___ data exfiltration.","ht":"Skein-512","diff":"Hard","hh":"1aa83f1912394d53a021a3475f2812b01ed147b5bd77a52ce94fd7e33de7ddba0fe453b6e3db5fccf44fd0a16ea033a090dbea11ce22943a6885962f5e0b7292","pw":false,"ef":["52","55","54","42","45","44","52","45"],"ei":[4,3,0,6,5,7,1,2]},{"q":"The compromised account had ___ failed login attempts.","ht":"Skein-512","diff":"Hard","hh":"cd7d534c3486d7380732f807711d326cff57e16444780dbcc7a089f6b30cf2202ae1b1ec58bcf17cb8e3b042bb59c97403316df4c0bb33d2a00698777a52015e","pw":false,"ef":["07","03","04"],"ei":[2,0,1]},{"q":"The ___ review board evaluates proposed changes for security impact.","ht":"Skein-512","diff":"Hard","hh":"b21391e797a9ea5233ca8f85a92a70a9a7b3ce062c03c83df51da11713f31ed6bb4e33c280e8c1669b93155bb18a73c4968cab72b2f58fbbb087bf271bae1703","pw":false,"ef":["5e","50","5e","45","59","51","51"],"ei":[5,0,2,1,6,3,4]},{"q":"The TLS configuration supports cipher suites with ___-bit keys.","ht":"Skein-512","diff":"Hard","hh":"fa6a6f228b918203692ba7c7f1438eda7e61240b85cfc8c528cc3f52e4ba0cb4eacf3478a3fac2fdefea0976fa985c5ab7d10c14b2168df79fbec9a7ab1bc164","pw":false,"ef":["03","03","07"],"ei":[0,1,2]},{"q":"Security champions advocate for ___ best practices in development teams.","ht":"Skein-512","diff":"Hard","hh":"d374e267f4d430b3793ea665a3b9ec3553a9eb776d769156c1bfab14d1ad6835e4c758e4450b22f7bcc18428d335fbcce42c55279d102813656130dac5c9af67","pw":false,"ef":["45","40","41","59","4e","52"],"ei":[4,0,2,5,1,3]},{"q":"The phishing campaign targeted ___ employees across departments.","ht":"Skein-512","diff":"Hard","hh":"dc9f181c5f612d58b59830841d34b0b02b212afc73109e3d671f3bb8c54ba273ef8889252fe978de31d4fe8cdf8b9df4a687c507ec5be003a33e472ed8955d9e","pw":false,"ef":["03","02","07"],"ei":[0,1,2]},{"q":"The security analyst discovered that the attacker used a ___ to exfiltrate data.","ht":"Skein-512","diff":"Hard","hh":"03f365ca3c6c22b91f97717db56ac01b714e03381086219a5173d89e6c86cae8d0259f124d82a066626e16f898726c8ebdc32b7a7cd5c9ad20d77470bb0e2fbd","pw":false,"ef":["45","56","52","5c","53"],"ei":[1,2,4,3,0]},{"q":"The security patch addressed ___ reported issues.","ht":"Skein-512","diff":"Hard","hh":"f2fc35765a03eacc758feb26c7c9fd8c4a931fb24c7a20312aca3e65cb4a9bd83c79cccb52106622d8aa46c97ea3abbd8c5f48aef500608f1c997912a144cd2c","pw":false,"ef":["03","07","01"],"ei":[0,2,1]},{"q":"Our team deployed a new ___ detection system last quarter.","ht":"Skein-512","diff":"Hard","hh":"7ab6303c1cc11ec61240465d0e8d6cabd4142dc561adfe46b71957badbcb27e61bd9f5de2195cf07b6b35df9226c9e5745a755aca9cab054219bb7274440e8c3","pw":false,"ef":["56","5e","51","4e","45"],"ei":[1,2,0,4,3]},{"q":"The honeypot recorded ___ unique attacker IP addresses.","ht":"Skein-512","diff":"Hard","hh":"af12847730edfd362c7e1f2d96e2ae344d37427bf1ede3bc8a951b960ebd9835343b7b3730768d6dc8eae947fa2e4bad6bf01a1a174e224d703fb0764fcc71a2","pw":false,"ef":["00","03","07"],"ei":[1,0,2]},{"q":"The ___ vulnerability was assigned CVE-2024-0012.","ht":"Keccak-256","diff":"Hard","hh":"9df0cbf5d2b98f721c66fe89b1e340e7254e68a5ac31ad44027c9f7f65ff4f4d","pw":false,"ef":["58","52","59","50","5a"],"ei":[2,4,1,0,3]},{"q":"The compliance framework requires ___ control objectives.","ht":"Keccak-256","diff":"Hard","hh":"0b41fc12142d090a2f8ff69e2a3fc70d5bbc0c656cd6d52a77abbd694a511fa3","pw":false,"ef":["07","03","0f"],"ei":[2,0,1]},{"q":"Penetration testers often use ___ techniques during red team operations.","ht":"Keccak-256","diff":"Hard","hh":"e63b8890ca76bf91c6cf05bcd3aa3918fdf2460966bd43f50f7853b00a16b9ab","pw":false,"ef":["5b","5b","43","45","58"],"ei":[3,4,0,1,2]},{"q":"The threat actor group was tracked as APT-___.","ht":"Keccak-256","diff":"Hard","hh":"403f12fe3ef80ed3dcef3585f9c006a082244d4b76720dbdb6f60814e58d4e64","pw":false,"ef":["03","0e","07"],"ei":[0,1,2]},{"q":"The malware was hidden inside a seemingly innocent ___ file.","ht":"Keccak-256","diff":"Hard","hh":"7cd93311db0849d85f67bb085d01c3c3308cb333e4ef52c6cad30730befa4c36","pw":false,"ef":["55","58","59","50","5e","5b"],"ei":[2,1,5,0,4,3]},{"q":"The data breach affected ___ user accounts.","ht":"Keccak-256","diff":"Hard","hh":"d97ea208c0f2197294e806f0b8e656eb99b6502903b5c352ca151fbf03f36ef0","pw":false,"ef":["02","06","07"],"ei":[0,2,1]},{"q":"Encryption keys must be stored in a secure ___ vault.","ht":"Keccak-256","diff":"Hard","hh":"c77949fa3c1e1633efef9ed29665a7fdd2280cecf9584821026003a2088e2f68","pw":false,"ef":["45","54","58"],"ei":[1,2,0]},{"q":"The security budget was increased by ___ percent this year.","ht":"Keccak-256","diff":"Hard","hh":"d85695b4fcb99954ac39e7db49eb052ad53ea83a68fb4a268e0cb9249ae2d789","pw":false,"ef":["05","02","07"],"ei":[2,0,1]},{"q":"Network administrators blocked the ___ protocol on port 3389.","ht":"Keccak-256","diff":"Hard","hh":"6768baaca3f394a0b52318737c2738dbb23d31e4c3c2eb9f22eef0a1977b7bb8","pw":false,"ef":["52","47","45","44","43","5e"],"ei":[5,1,2,0,4,3]},{"q":"The penetration testing engagement lasted ___ weeks.","ht":"Keccak-256","diff":"Hard","hh":"bbe2a9fc9cb4862cfcb5b75986c1ea0cf1ab29087e07d6e3b4d7178507d6a210","pw":false,"ef":["04","02","07"],"ei":[2,0,1]},{"q":"The zero-day exploit targets the ___ component of the kernel.","ht":"KangarooTwelve","diff":"Hard","hh":"e84fdb502aa99d9f2ece65a823cfaad9d5db8625d3681870fcd4657b8ad9c985","pw":false,"ef":["52","52","44","47","45","43","54"],"ei":[2,5,0,1,6,4,3]},{"q":"The malware sample had a ___ percent detection rate on VirusTotal.","ht":"KangarooTwelve","diff":"Hard","hh":"c7ab048a7d31780e102cb50510ee72d669da1b19c46d16eb4c3299256351e6aa","pw":false,"ef":["07","02","02"],"ei":[1,0,2]},{"q":"A robust ___ policy is essential for enterprise security.","ht":"KangarooTwelve","diff":"Hard","hh":"2b083482badbe679af773fbd353e51a272d40dc4476b7dc6c8732c1c3955cb89","pw":false,"ef":["43","40","56","45","5f","5e"],"ei":[4,0,2,1,5,3]},{"q":"The access control policy limits administrative sessions to ___ minutes.","ht":"KangarooTwelve","diff":"Hard","hh":"3ac692ac21e9f699fe7d575c2786b6bfde6a7774cfe9f3cb0ee4c08a7cc5f5d4","pw":false,"ef":["07","01","02"],"ei":[1,2,0]},{"q":"The forensic investigator recovered the deleted ___ from the disk image.","ht":"KangarooTwelve","diff":"Hard","hh":"c430a57ecdb55b22505674bf73a0c81cda945ffdda0c4be368f682f488c74d1f","pw":false,"ef":["5f","56","52","55","52","44","59"],"ei":[4,1,5,0,6,3,2]},{"q":"The security operations center processes ___ events per second.","ht":"KangarooTwelve","diff":"Hard","hh":"c43ab481f73f2908e449519316a42263bf586c081c7e4f1a0f548d228adba72c","pw":false,"ef":["02","00","07"],"ei":[0,2,1]},{"q":"Security teams monitor the ___ for signs of compromise.","ht":"KangarooTwelve","diff":"Hard","hh":"2a3996040ce1e2bd8b5f0aae697c52ae1877c77cdd8614325b9d6c2241dbb466","pw":false,"ef":["44","58","50","5b","47","52","52","5e","43","43","45"],"ei":[9,1,6,2,0,7,4,8,10,3,5]},{"q":"The vulnerability was patched within ___ hours of disclosure.","ht":"KangarooTwelve","diff":"Hard","hh":"ef5ae7fc341621884dbc18702de46f20e744fbe1f8b5b5e300cdcedcaf6cbc47","pw":false,"ef":["02","07","0f"],"ei":[0,1,2]},{"q":"The attacker escalated privileges using the ___ misconfiguration.","ht":"KangarooTwelve","diff":"Hard","hh":"7bcd2ededeb219b51f8118d6df79437fe01f1b2e2554638297972a30cf4d394b","pw":false,"ef":["5e","53","59","5d","59"],"ei":[2,0,3,1,4]},{"q":"The network segmentation created ___ isolated security zones.","ht":"KangarooTwelve","diff":"Hard","hh":"65fe6e2e58908d082ebde92e9550341bf8293a2b66d9d35ea399446a1b23b199","pw":false,"ef":["07","0e","02"],"ei":[1,2,0]},{"q":"Multi-factor authentication prevents unauthorized access to the ___.","ht":"ParallelHash","diff":"Hard","hh":"c26f5cf1e57b8917585842dbce98fa87847cbdeaf24357049d4577b82f2805b6","pw":false,"ef":["5e","5e","43","51","45"],"ei":[3,0,4,1,2]},{"q":"The backup retention policy maintains ___ copies of critical data.","ht":"ParallelHash","diff":"Hard","hh":"4fb5513d2bca6b795d8c60034d4ae5d3d4d6a0a3a101420e0339545c4383c4b8","pw":false,"ef":["06","07","02"],"ei":[1,2,0]},{"q":"The company implemented a new ___ to comply with regulations.","ht":"ParallelHash","diff":"Hard","hh":"e8e0b3dad3f047d29b18d7131b03edebfd81ba8d099ed4f564530d301db57d85","pw":false,"ef":["45","5a","5e","53","56"],"ei":[2,0,3,4,1]},{"q":"The security awareness quiz had ___ questions about phishing.","ht":"ParallelHash","diff":"Hard","hh":"8c101cb86dc55630160bb0e80f54842c45bdd832f93a1bec22c74eaa50f943d4","pw":false,"ef":["07","02","05"],"ei":[2,0,1]},{"q":"Researchers demonstrated a ___ attack on the wireless network.","ht":"ParallelHash","diff":"Hard","hh":"ec6a258e0eb291b45f3c6880e421ba466d90c4995c56bdc1d57019f11c3bae64","pw":false,"ef":["5b","50","5f","42","58"],"ei":[4,0,1,3,2]},{"q":"The attacker used ___ bytes of shellcode in the exploit.","ht":"ParallelHash","diff":"Hard","hh":"561a0161fe117b3425468a9687c1cd62fe436d324e5ffa4f55c299474c16004b","pw":false,"ef":["07","02","04"],"ei":[2,0,1]},{"q":"The security audit revealed weaknesses in the ___ architecture.","ht":"ParallelHash","diff":"Hard","hh":"bb211aba65f88a6c6ae0316df3b14bf56591324628bf7a710cbd2994d786e66e","pw":false,"ef":["41","47","5a","52","56","5e","45"],"ei":[0,3,2,6,1,4,5]},{"q":"The security framework defines ___ domains of cybersecurity.","ht":"ParallelHash","diff":"Hard","hh":"0b4797902be874c365d15b9a79f7456fbb88d186fe29eff1b9d6675a30ee7c4a","pw":false,"ef":["02","03","07"],"ei":[0,1,2]},{"q":"Incident response procedures require logging all ___ events.","ht":"ParallelHash","diff":"Hard","hh":"d21d20bffda613144ca0e7511bad25b25df3f3c988e39b6b26ba130baafadb25","pw":false,"ef":["52","56","4e","58","45","43","59","5f","5b","54","47"],"ei":[10,3,1,8,7,5,4,6,0,2,9]},{"q":"The endpoint management system covers ___ devices.","ht":"ParallelHash","diff":"Hard","hh":"aeddef786b5634ebc2aaa71a30d2b1e12c184580d0435702ad29295bfd9920ef","pw":false,"ef":["07","02","02"],"ei":[2,1,0]},{"q":"Advanced persistent threats often disguise themselves as legitimate ___ traffic.","ht":"Haraka","diff":"Hard","hh":"339be557a6afc252eeaa64931fa4e8a5aba8d9924a598e8c814240b7a8727175","pw":false,"ef":["53","58","40","59","5e","50","52"],"ei":[3,6,0,2,4,5,1]},{"q":"The security incident affected ___ systems in the production environment.","ht":"Haraka","diff":"Hard","hh":"39b4ed95afe4bfe221a3ca8c0b886019aed18b5d4d38ad7e1754bcd4232d58a4","pw":false,"ef":["01","02","07"],"ei":[1,0,2]},{"q":"The ___ module was patched in the latest security update.","ht":"Haraka","diff":"Hard","hh":"2c81e54dac8d32c2271e2cb8cad70a0bee081249c429ac92280c36c875960fa0","pw":false,"ef":["5c","45","59","44","5e","52","56","40","5b","5c"],"ei":[7,9,3,0,2,8,5,4,6,1]},{"q":"The cryptographic hash produced a ___-character hex digest.","ht":"Haraka","diff":"Hard","hh":"16f77b643e83c22570888c81bfd3131a8a5a29d9423df231f6c3a9b1cf7a18f6","pw":false,"ef":["02","00","07"],"ei":[0,1,2]},{"q":"Cybercriminals used social engineering to bypass the ___ control.","ht":"Haraka","diff":"Hard","hh":"e4e0d4c0c8ff8fce2334f32136915c72aafb738824ebadfe81c6027a597d3d23","pw":false,"ef":["45","50","43","55","56","50","58"],"ei":[5,2,6,0,4,3,1]},{"q":"The security analyst reviewed ___ log entries during the investigation.","ht":"Haraka","diff":"Hard","hh":"13d7c108dc16d2d088e0bf11229c641c8c2e73a3b639a81f026b542b6fe701e3","pw":false,"ef":["0f","02","07"],"ei":[1,0,2]},{"q":"The security framework mandates encryption of all ___ in transit.","ht":"Haraka","diff":"Hard","hh":"dd056f1d7633abf9285c8cba8f3427c9d41b0219944a9844b26e8944c101786b","pw":false,"ef":["5e","5c","5b","47","52","52"],"ei":[4,0,2,3,5,1]},{"q":"The risk assessment identified ___ high-risk assets.","ht":"Haraka","diff":"Hard","hh":"7eee37ea629c4f448d8adeb2250f79dce2878b9b921a17a181dd9e227bf39c09","pw":false,"ef":["0e","07","02"],"ei":[1,2,0]},{"q":"Vulnerability scanners detected a critical ___ in the web application.","ht":"Haraka","diff":"Hard","hh":"19cda2aaebab9b42dac58d5bcc409b896e3768b375f679f64f7ab40d8723a104","pw":false,"ef":["44","5c","52","52","5b","5e"],"ei":[0,3,1,5,2,4]},{"q":"The security monitoring system uses ___ detection rules.","ht":"Haraka","diff":"Hard","hh":"37a7c3e46e4ef8efd9204a278f992db6241481b82d67029ce8eb5636c47b246f","pw":false,"ef":["07","01","06"],"ei":[1,0,2]},{"q":"The honeypot captured the attacker\'s ___ command sequences.","ht":"Streebog-256","diff":"Hard","hh":"eba5f777788d84862c66f12d23727727eefd0383001dba6a48376c10bd387d7e","pw":false,"ef":["40","5b","5e","58","5b","40"],"ei":[5,3,1,4,2,0]},{"q":"The zero-day exploit was sold for ___ dollars on the dark web.","ht":"Streebog-256","diff":"Hard","hh":"25c1ebc1d910eefb1cf6a53cc27f1c79cbdd1fd7fd15e7f2aaee4dc39317f6f2","pw":false,"ef":["05","07","01"],"ei":[2,1,0]},{"q":"Secure coding practices prevent injection of malicious ___ payloads.","ht":"Streebog-256","diff":"Hard","hh":"41c5be5f4a4ea56dbd3d2cebd87c63c6a57e2e7038c43b27537a571777e5ef66","pw":false,"ef":["54","5f","5e","45","55"],"ei":[3,4,1,2,0]},{"q":"The security policy review cycle occurs every ___ months.","ht":"Streebog-256","diff":"Hard","hh":"4311b990153b6323f04fa3a6b34738ae45042fa9b0b84cb8d6d14e52bd8d6b51","pw":false,"ef":["01","07","04"],"ei":[0,1,2]},{"q":"The ___ algorithm provides collision resistance for digital signatures.","ht":"Streebog-256","diff":"Hard","hh":"f3ea5bbcb93f0f508a539a317fc974345c79120aa49eb41d888cc08842f36521","pw":false,"ef":["54","53","56","45","52"],"ei":[0,2,3,4,1]},{"q":"The incident response team has ___ trained members.","ht":"Streebog-256","diff":"Hard","hh":"39cdd21f4de7408c2c8011c975d3d3607fb435d10088ee71e9b5a53026a8cfd4","pw":false,"ef":["07","01","03"],"ei":[1,0,2]},{"q":"Endpoint protection software quarantined the suspicious ___ process.","ht":"Streebog-256","diff":"Hard","hh":"46ba146e54409762d0fb3e08aaac8b228e147ba97d9c070e4b0b6cdb780f2bdb","pw":false,"ef":["47","44","52","4e","45","44","54"],"ei":[2,6,4,1,3,5,0]},{"q":"The vulnerability database tracks ___ known CVEs.","ht":"Streebog-256","diff":"Hard","hh":"971cd0bcaaac831ab90af8627cd10121a1bf43dd433104682c21259d22a3de2f","pw":false,"ef":["07","01","02"],"ei":[1,0,2]},{"q":"The security operations center analyzed the ___ logs for anomalies.","ht":"Streebog-256","diff":"Hard","hh":"05609c510ae38637cc2054e304987db7ec5e2e650db16d9f51398a71d828bc43","pw":false,"ef":["45","5d","42","52","47","59","5e"],"ei":[6,0,1,5,4,2,3]},{"q":"The security compliance audit requires ___ evidence artifacts.","ht":"Streebog-256","diff":"Hard","hh":"863921dd4067507d32e0ef219ed035788485a2bfbdcf59f8c43d87be4393385f","pw":false,"ef":["06","07","01"],"ei":[1,2,0]},{"q":"Threat intelligence feeds identified the ___ campaign targeting our sector.","ht":"Streebog-512","diff":"Hard","hh":"a324a51056a9ed79f4493c5c39835fd02e6e1b61c22536a96bb9ee5c68620a67e10646df1d6c427e75d79e5ca2883e672bc728bd2f4bf423154622d532c98bdf","pw":false,"ef":["58","5a","56","5b","50","56","5e","59"],"ei":[4,0,7,5,2,1,6,3]},{"q":"The encryption algorithm operates in ___ rounds of transformation.","ht":"Streebog-512","diff":"Hard","hh":"fc652118787d1eee09b8673c1a9b433c3cc2c01593c6a499714477604fbfcc000e1aeebd24dcdc5a3150e348681de0b3b197fadafa6725ba7e232f6f36aec373","pw":false,"ef":["05","01","07"],"ei":[1,0,2]},{"q":"Data loss prevention tools monitor the movement of sensitive ___ assets.","ht":"Streebog-512","diff":"Hard","hh":"50558bb097a2e22f44a7813cca1674c4ad58ec77e6bb77bb06d9f47d91d18af7ccbb976254d517c123c5e6986a737a9731028cf68d263dd5ccd6c13c626aab81","pw":false,"ef":["56","52","42","5e","58","44","46"],"ei":[6,1,3,5,4,0,2]},{"q":"The security dashboard displays ___ key performance indicators.","ht":"Streebog-512","diff":"Hard","hh":"f25e057e8bb6e0d2cb9103a27eb3f6ddb91bc5688b63596214c0c4488e7f334531c96acda4ea71b6671bdc16bce054e8392a597422dd051b5e92e3657b401208","pw":false,"ef":["04","07","01"],"ei":[1,2,0]},{"q":"The penetration test report highlighted risks in the ___ configuration.","ht":"Streebog-512","diff":"Hard","hh":"430f30bcfe7f95856ba7df0d58c02aabfd3009b9c5c0d7092bcf09309c12a67433661bbd276763ee4aa17444393ad97b374ea1b9c80e387313870831988a656a","pw":false,"ef":["45","58","52","58","40","53","53"],"ei":[0,5,1,4,3,2,6]},{"q":"The threat intelligence report covers ___ adversary groups.","ht":"Streebog-512","diff":"Hard","hh":"b26f76afe96208724d50228dcc2910af42b393d9e3f9ff1dafdfbd7583efbf79bbad568e0c4295c3085c6166491db24fdffdd82000b044f3d1de54d70d9b576f","pw":false,"ef":["01","03","07"],"ei":[0,1,2]},{"q":"A robust ___ strategy mitigates the impact of ransomware attacks.","ht":"Streebog-512","diff":"Hard","hh":"f85cfb5ec6794b1da4fef59b3b65993b609157e227b197d5d1464ca94b02b9fa36b5921863323722e9e69f990be4cfbf94052011818f6d5135a597f01bde3dfb","pw":false,"ef":["54","45","42","44","52","47"],"ei":[4,2,3,0,5,1]},{"q":"The security assessment evaluated ___ control areas.","ht":"Streebog-512","diff":"Hard","hh":"9b2874fe263de2dffe025ec96510ba44c49f765468b4913746abde55a139652e39067e8b29441234628f4bc047f4d55a09eb0ba080c88a34ab36c9460e9b4c38","pw":false,"ef":["07","02","01"],"ei":[2,1,0]},{"q":"The security team configured the ___ to filter malicious domains.","ht":"Streebog-512","diff":"Hard","hh":"a09127ba49ed013c4882f0b81e5c17705e78648ccd7157056209eb270bc5bbda66eede3e3949c62c5ece20e7aace15b85fee54f0ba6c9a0349dce14e3fbdd667","pw":false,"ef":["52","4e","40"],"ei":[1,0,2]},{"q":"The password reset rate was ___ percent last quarter.","ht":"Streebog-512","diff":"Hard","hh":"0c92ac34e7577564c8c6255d36c4cb5a5afbe6f247205a6d430b78174172442baad05eb807ed8c0f45b3967991e6752cc41f7f0d3c83c6e9001e50a502830c9c","pw":false,"ef":["01","01","07"],"ei":[1,0,2]},{"q":"Forensic analysis of the ___ revealed the attack timeline.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"f577e3e2b2df17be41e7020659d0ee1ecd2d34e124bc263c3d88eb06361c0658","pw":true,"ef":["5c","43","56","52"],"ei":[3,0,2,1]},{"q":"The security alert severity scale ranges from ___ to 10.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"43f9c8a6ad6d71cc95a8c288689a8a8327cb69a0b92efa06e1ba5284e529ec7b","pw":true,"ef":["07","01","00"],"ei":[2,0,1]},{"q":"The compliance officer reviewed the ___ handling procedures.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"22b9bc8d81fa4c7f7dfa0bc295d7cd28541112180125fb3246be6e56bf38e196","pw":true,"ef":["52","4e","58","55","59"],"ei":[0,4,2,1,3]},{"q":"The network traffic analysis captured ___ gigabytes of packet data.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"e32875ca7f810d8609e4ae54c93bbea8bb250795d2282182499953e63d467422","pw":true,"ef":["01","0f","07"],"ei":[0,1,2]},{"q":"Machine learning models help detect anomalous ___ patterns in network traffic.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"3ec51a101f02bdb8156165eccb506284d0e26274e3973c8f432242f3f8611843","pw":true,"ef":["56","4e","5a","50","56","58","59","5f"],"ei":[1,7,0,4,5,3,6,2]},{"q":"The security policy applies to ___ departments in the organization.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"9dfbf7c6843088a933c6d3396bbe580524d60905f37056537963b417ce3184c2","pw":true,"ef":["0e","07","01"],"ei":[1,2,0]},{"q":"The ___ framework provides a structured approach to risk assessment.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"d8e48304198401a0dfa964ca0c267a168e7b36a32da564cb60a116fcfb7b6e59","pw":true,"ef":["47","56","52","5b","5a"],"ei":[2,1,4,3,0]},{"q":"The vulnerability remediation SLA is ___ days for critical issues.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"ac57374f02524aeaf9e49f3a3ab6f1abbfe3104715ffa384cba8e9679f804459","pw":true,"ef":["06","00","07"],"ei":[2,0,1]},{"q":"Security awareness training covers the dangers of ___ phishing attacks.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"07a839b23a969c41e6c47f50cf0807e24f65374abf2f27420e6fa77aa90b78b4","pw":true,"ef":["5c","54","5f","58","5e","4e","45"],"ei":[3,2,0,4,1,6,5]},{"q":"The attacker maintained persistence for ___ days before detection.","ht":"PBKDF2-HMAC-SHA256","diff":"Expert","hh":"49581397e9fd1610406ee24ab5c9ee2d219311bc7a59d027caf5dd962c90a47c","pw":true,"ef":["00","05","07"],"ei":[0,2,1]},{"q":"The incident commander coordinated the response to the ___ breach.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.2fa3ScJGHsSZ07w17HnY/gXRo25rQIy","pw":true,"ef":["42","56","40","59","5b","43"],"ei":[4,1,0,3,2,5]},{"q":"The multi-factor authentication adoption rate is ___ percent.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.kegTLD8XnmcSRSzPwaIy1m9htOF4DDW","pw":true,"ef":["04","00","07"],"ei":[2,0,1]},{"q":"Encryption at rest protects the ___ database from unauthorized access.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.6u9Ng6udH7jC6NT6wd01i39ZezgEwVO","pw":true,"ef":["42","43","43","55","42","52","43","45","59"],"ei":[1,8,2,0,7,4,3,5,6]},{"q":"The security review found ___ non-compliant systems.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.B0UVBOkkngzdaNAGuz0vIgqzqyIeWOm","pw":true,"ef":["00","02","07"],"ei":[0,2,1]},{"q":"The red team exploited a ___ vulnerability to gain persistence.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.sDea6biwiyG9odJRfUoUno6NZyAaqTu","pw":true,"ef":["42","43","52","44","59","43","5f","54"],"ei":[6,7,2,3,5,4,1,0]},{"q":"The data classification policy defines ___ sensitivity levels.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.8KDXZdXmAfOiOKirSATk20KXSUwLn/q","pw":true,"ef":["00","06","07"],"ei":[0,1,2]},{"q":"Blue team defenders implemented new rules to detect ___ activity.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.TYjC6NsSOW55VH2ukNxJtyq/N33FDWC","pw":true,"ef":["54","52","56","47","59"],"ei":[2,1,3,0,4]},{"q":"The security team blocked ___ phishing emails last month.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.Qwrlb7hYRo5r.vKUv/MRRXNdxqOGmy6","pw":true,"ef":["00","07","05"],"ei":[0,2,1]},{"q":"The security policy requires annual review of ___ access controls.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.8qstqtnCIb73/97OjwQXk97kFjJyL6q","pw":true,"ef":["52","54","4e","45","55"],"ei":[3,0,1,4,2]},{"q":"The network access control enforces ___ policies per device.","ht":"bcrypt","diff":"Expert","hh":"$2b$04$8HbRM5KlkUvOrBGBisdlQ.k4hY8DQqE/qgviVosEfU6MP61/S.8RC","pw":true,"ef":["00","07","04"],"ei":[0,2,1]},{"q":"Threat hunters proactively search for indicators of ___ compromise.","ht":"scrypt","diff":"Expert","hh":"5c6f2eb556ace6cc1b0ad81371ac1835989f4cdf438bb0c1170cf42cf60ec1ae1fc09a9a1a622e13011940f7bc1569615e47e77997dfc3f942da87444690bf5a","pw":true,"ef":["5e","52","4f","47","5b"],"ei":[1,3,2,0,4]},{"q":"The incident was escalated to tier ___ support.","ht":"scrypt","diff":"Expert","hh":"d1e22263b1c5351c5e34ed395c6aa972db0e8cf8e7350c617f46ff7011c1755bc6d06492f6082567a170757f7d3d7d4e4b59ad634a386e23958cccfad0f7e249","pw":true,"ef":["00","07","03"],"ei":[0,2,1]},{"q":"The ___ standard defines requirements for information security management.","ht":"scrypt","diff":"Expert","hh":"909c3c90765d875a43d3bd427c9f64bf826e60c9c3f073e81a7413932e0d22bb63213974233840f2777b2b0ef3ec53a2e646de407b0a9ea55ef65e199b309e8c","pw":true,"ef":["5e","59","56","4e","45","55"],"ei":[1,2,3,5,4,0]},{"q":"The security program achieved ___ percent coverage of critical assets.","ht":"scrypt","diff":"Expert","hh":"517612b276134a8854b78d25b9641d5f0f26b168ff07703cb04c15729a04449ea2c84d9ceffd4fbae6f698ca68005d770fd1c4e12d88135a7dd4cb7a2671f16a","pw":true,"ef":["00","07","02"],"ei":[0,2,1]},{"q":"Security architects designed a zero-trust ___ for the hybrid cloud.","ht":"scrypt","diff":"Expert","hh":"5969d4898ae2ba79b7369867729969eaf89b2292305487a378459a1ef5d9756dc72c732d01781616318a39ad4dd68b06294573088e2b121ecd9512d5dbbf93c0","pw":true,"ef":["4f","4e","56","44","43","59"],"ei":[5,1,4,0,3,2]},{"q":"The backup system creates snapshots every ___ hours.","ht":"scrypt","diff":"Expert","hh":"ca5e8610d1ddaf782229be49c8ee58b54593392652a967e8ce7355c1e4d34090bc0465eae62bee8a68b3f6eeeff059351d05dae24c58ec82e812b7b20098a6aa","pw":true,"ef":["01","00","07"],"ei":[1,0,2]},{"q":"The vulnerability management program prioritizes remediation of ___ flaws.","ht":"scrypt","diff":"Expert","hh":"1cb41598d4827affe5203fb85124095eaa78ecf954063ee0cc0028178dbb92d2a7370e644987f34ebe0de91e2514abc0f8fb1a97bdada087742b509278296441","pw":true,"ef":["5b","52","52","45","5c","59"],"ei":[5,4,1,2,0,3]},{"q":"The threat model identified ___ potential attack paths.","ht":"scrypt","diff":"Expert","hh":"c6d8a2a5d6179fb516c8814db18fb9e1859dc5e5fb6a4599ce06c409ae3a498d62ecc5f48c08c4b93c3a0f6006e864f8829bdf1a792b88b7947f0bb65f23f607","pw":true,"ef":["00","00","07"],"ei":[1,0,2]},{"q":"Digital forensics experts recovered encrypted ___ from the seized devices.","ht":"scrypt","diff":"Expert","hh":"6f4b3e6d9bd619e8fa3299358b83ad2e716848efd3500392985f642976ee651d61b006db31a5a8fd5152583f9562dd3deb2f0435d1415ce7c1c11514f4ef373f","pw":true,"ef":["56","5f","45","52","53","43"],"ei":[4,1,2,3,5,0]},{"q":"The security awareness program trained ___ employees this quarter.","ht":"scrypt","diff":"Expert","hh":"5ea5abfbd68ef5eb584d8037cdbf9e78fda6f26c0f3ce805190c445159080d16c80d42d396c45ed9743e8427029ebc4c3d24170271879dcefa6de3ba32036465","pw":true,"ef":["07","0f","00"],"ei":[2,1,0]},{"q":"The ___ protocol ensures integrity of data in transit.","ht":"Argon2d","diff":"Extreme","hh":"17936dc6c9154391c837ea838de58e61e0142e0da9dff27782fe0ec2af4db772","pw":true,"ef":["44","54","5c","58","52","43"],"ei":[0,2,3,1,4,5]},{"q":"The cryptographic module passed ___ validation tests.","ht":"Argon2d","diff":"Extreme","hh":"429db8a3f6c427771c9a2cf538468e234e1e94bb70397baec573df69d84f335e","pw":true,"ef":["0e","07","00"],"ei":[1,2,0]},{"q":"Penetration testers chained multiple ___ exploits to achieve domain admin.","ht":"Argon2d","diff":"Extreme","hh":"2a4078b8a64eb7481a4b4061d8171f55bf22663260c2044d791d11bd321117a7","pw":true,"ef":["5c","43","47","56","52","54"],"ei":[3,5,0,1,4,2]},{"q":"The security event log retained ___ entries.","ht":"Argon2d","diff":"Extreme","hh":"d3865bd119f8aee4e7577fce7ffc05d2e48a72e355cdb71334aa99910358709e","pw":true,"ef":["06","07","0f"],"ei":[1,2,0]},{"q":"The security dashboard displays real-time ___ metrics.","ht":"Argon2d","diff":"Extreme","hh":"e1ebf171cc6f9c660e3a2300283564fee3953f84cbc8dafda6b52b950548b4d2","pw":true,"ef":["55","52","59","58","56","54"],"ei":[0,1,5,4,2,3]},{"q":"The attacker brute-forced the password after ___ attempts.","ht":"Argon2d","diff":"Extreme","hh":"0da3dcb76db40f1ffd502d7c052cc1b845416bdb5a9dfafe06197eb2b821b4e9","pw":true,"ef":["07","0f","05"],"ei":[2,0,1]},{"q":"Access control lists restrict ___ permissions to authorized personnel.","ht":"Argon2d","diff":"Extreme","hh":"b53386786e2464b1fce350f9d46a6773a9aa5b01ff7517bdd942ede102728282","pw":true,"ef":["50","59","5b","56","5e","44"],"ei":[2,3,5,4,1,0]},{"q":"The security architecture includes ___ defense layers.","ht":"Argon2d","diff":"Extreme","hh":"7b3a4d494d2aeb79c52ac1f138a9d215def28914af0120b80699290f98a33c98","pw":true,"ef":["07","04","0f"],"ei":[2,1,0]},{"q":"The malware sandbox analyzed the behavior of the ___ payload.","ht":"Argon2d","diff":"Extreme","hh":"87b63e734e703405f98b4008a45d44a9543663e5d4683fe3eafd441ba2508799","pw":true,"ef":["58","5a","53","5a","52"],"ei":[1,0,2,4,3]},{"q":"The compliance report covered ___ regulatory requirements.","ht":"Argon2d","diff":"Extreme","hh":"bdc2bf7a45ec1e9c4b83a4dce9eb82ac3189ea5cd170c06e2b10075193490507","pw":true,"ef":["0f","03","07"],"ei":[0,1,2]},{"q":"Security researchers published a detailed ___ analysis on their blog.","ht":"Argon2i","diff":"Extreme","hh":"a82647b909c90249f40011ff50517d3d4e60aa9aebff0c757c6df9b9510370b1","pw":true,"ef":["45","42","52","43","45","58"],"ei":[0,2,4,3,5,1]},{"q":"The security assessment identified ___ findings total.","ht":"Argon2i","diff":"Extreme","hh":"f520116d59b6c80e7b49e7255002b58e1a3eba389baca05d7ccfcdde5e905c7d","pw":true,"ef":["07","0f","02"],"ei":[2,0,1]},{"q":"The ___ mechanism prevents replay attacks in authentication protocols.","ht":"Argon2i","diff":"Extreme","hh":"1787fb4ccf38c7027415ddbc6f386eadbad49c5c3725320fdce2bf2205bc04a2","pw":true,"ef":["5e","45","53","55","52","50"],"ei":[2,1,3,0,5,4]},{"q":"The malware propagation rate was ___ systems per hour.","ht":"Argon2i","diff":"Extreme","hh":"fd4b84f3bfa92f3c5cf93c1050849c578bfd4c445d02fa82addf38e021a03473","pw":true,"ef":["01","0f","07"],"ei":[1,0,2]},{"q":"Network segmentation isolates the ___ zone from the production network.","ht":"Argon2i","diff":"Extreme","hh":"39a1625a78fee1ee13a56b14de416ef69b664430e5652fbed5ecd1cfdb7f41e9","pw":true,"ef":["52","40","43","4e","56","56","50"],"ei":[3,4,2,6,5,1,0]},{"q":"The security operations team works in ___-hour shifts.","ht":"Argon2i","diff":"Extreme","hh":"ec06bce11ce4fbe0a1084db43249e2b2b78bc5e525798dc2c2e052c13bcd691a","pw":true,"ef":["00","07","0f"],"ei":[1,2,0]},{"q":"The security engineer configured rate limiting on the ___ endpoint.","ht":"Argon2i","diff":"Extreme","hh":"8d085707a29426c219233eb9c0fed0834664466fa718639410d5d88cc887643f","pw":true,"ef":["52","5b","5e","45","5b","40","56","51"],"ei":[3,7,1,2,6,4,5,0]},{"q":"The access review cycle covers ___ user accounts.","ht":"Argon2i","diff":"Extreme","hh":"96c4bbc3b7e48860f87c9558d10b478919bbd25224d3314c477d5eca2f4b6c17","pw":true,"ef":["0f","07","0f"],"ei":[1,2,0]},{"q":"Threat modeling identifies potential ___ attack vectors early in development.","ht":"Argon2i","diff":"Extreme","hh":"ff1c9d7d94a1dbea8034044fed1900fd7a2117b65a67bfea655ec90b988d395a","pw":true,"ef":["59","56","56","43","59","59","52"],"ei":[4,0,6,2,5,1,3]},{"q":"The security baseline document contains ___ configuration items.","ht":"Argon2i","diff":"Extreme","hh":"364da43166514fe83ac656ce299c993b9e72071294e6169677da904e80c5dc95","pw":true,"ef":["0f","07","0e"],"ei":[0,2,1]},{"q":"The ___ cipher suite provides forward secrecy for TLS connections.","ht":"Argon2id","diff":"Extreme","hh":"c0e3a16a702c8e41ee7b073f0c5339ae5fd227f6af56b0c6ed42a43afdddf278","pw":true,"ef":["5e","54","5e","42","45","43","54"],"ei":[5,3,1,4,2,6,0]},{"q":"The vulnerability scan completed in ___ minutes.","ht":"Argon2id","diff":"Extreme","hh":"8f70af3f3945c803ae07a5baa4fa0b1eab836c0fc7947e839d394055fd9e4402","pw":true,"ef":["07","06","0e"],"ei":[2,1,0]},{"q":"Log correlation helps security analysts detect stealthy ___ intrusions.","ht":"Argon2id","diff":"Extreme","hh":"0c83ded9954c893f9042715b4ea5ba6ce49cc23dbcbe2d0cbaa68b04a38e4f3a","pw":true,"ef":["43","50","58","5b","41","56","52"],"ei":[3,5,1,2,0,4,6]},{"q":"The threat hunting exercise covered ___ hypothesis scenarios.","ht":"Argon2id","diff":"Extreme","hh":"3222fdebd91b2eef1b03ba91fba74d3b178f733047158b31ebac2efe8b6a47c3","pw":true,"ef":["07","05","0e"],"ei":[2,1,0]},{"q":"The vulnerability disclosure policy governs reporting of ___ issues.","ht":"Argon2id","diff":"Extreme","hh":"3a674f1c7396d7723b9b6a41d21b890c959160da081eb33254b1abf928c64e82","pw":true,"ef":["59","54","43","42","45","52","45"],"ei":[5,0,6,1,3,4,2]},{"q":"The security policy exception process requires ___ approval levels.","ht":"Argon2id","diff":"Extreme","hh":"b97b552bb622076c4219a2a0881a6b30c4c58c2dc99dca6ffeb212463347531a","pw":true,"ef":["04","0e","07"],"ei":[1,0,2]},{"q":"Cryptographic ___ ensures confidentiality of classified communications.","ht":"Argon2id","diff":"Extreme","hh":"bc85e671af6717fca448a18ee85bca8126543a3ebb664484cd4188adb73e62c1","pw":true,"ef":["54","43","58","47","54","5e","56","45","56"],"ei":[0,6,7,2,4,5,3,8,1]},{"q":"The incident post-mortem identified ___ lessons learned.","ht":"Argon2id","diff":"Extreme","hh":"aca9780424130e2e849b08bf2194f5761d2e790f27acd11cb200ae05e3ed0e8c","pw":true,"ef":["0e","07","03"],"ei":[0,2,1]},{"q":"The security awareness program educates employees about ___ risks.","ht":"Argon2id","diff":"Extreme","hh":"5e5dda35783230771c107d25c0253df40d2bae8505092054913b593ef3d8ab73","pw":true,"ef":["45","5e","59","43","42","58","54","53"],"ei":[7,0,1,5,3,6,4,2]},{"q":"The security investment ROI was calculated at ___ percent.","ht":"Argon2id","diff":"Extreme","hh":"60e27d3bcfb235fd516d397f88ca3751d515f9050db9a7c39ea39837d12783d1","pw":true,"ef":["02","0e","07"],"ei":[1,0,2]},{"q":"The ___ scanner detected outdated software on the workstation.","ht":"Yescrypt","diff":"Extreme","hh":"c03162d19485d9326c47f1ae73bc39739aede309e09a94d09a93a95cdfcb7bd3","pw":true,"ef":["45","51","56","45","58","52","5a","45","43","59","44"],"ei":[10,5,2,7,6,9,8,1,0,3,4]},{"q":"The endpoint detection system uses ___ behavioral analytics models.","ht":"Yescrypt","diff":"Extreme","hh":"d214a5255d107441bda75bcac0377170bb3b3b63edc1e554525ea1c1ba1823f3","pw":true,"ef":["07","0e","01"],"ei":[2,0,1]},{"q":"Incident responders isolated the compromised ___ to prevent lateral movement.","ht":"Yescrypt","diff":"Extreme","hh":"533da0ef331e1c2051369f2c4fd003df37d46fc8a2dce15af284833069b8a061","pw":true,"ef":["5e","53","53","52","58"],"ei":[1,0,3,4,2]},{"q":"The network firewall has ___ rule entries configured.","ht":"Yescrypt","diff":"Extreme","hh":"d81db7e6afef8a820c24bb8c51e040d7487ed7f637ec52898da4889ee6a69731","pw":true,"ef":["00","07","0e"],"ei":[1,2,0]},{"q":"Security metrics track the effectiveness of ___ controls over time.","ht":"Yescrypt","diff":"Extreme","hh":"c3ea49a5b1c9004f0162a4bf32a20ce2ae57e2fb04ba18a3e1c57dfba1d00d81","pw":true,"ef":["43","59","43","5e","58","44","56","45","45","44"],"ei":[7,3,0,5,8,6,2,1,9,4]},{"q":"The data loss prevention policy covers ___ data categories.","ht":"Yescrypt","diff":"Extreme","hh":"bfcf2e0331bdfdb65e865915c60f50bce0e67e4f0fcb20e200ef194e162acf0d","pw":true,"ef":["0e","0f","07"],"ei":[0,1,2]},{"q":"The ___ assessment evaluated the organization\'s cybersecurity posture.","ht":"Yescrypt","diff":"Extreme","hh":"128f3a62a778aa4fef78363ed5807c9f53fa645bd25f7afd2fca1c516a787d8d","pw":true,"ef":["52","45","4e","56","5b"],"ei":[1,0,4,3,2]},{"q":"The security monitoring generates ___ alerts per day.","ht":"Yescrypt","diff":"Extreme","hh":"54e82bd305eb82147ff94a50966bdd4a0906462d3590892723515c7ee6195aee","pw":true,"ef":["0e","07","0e"],"ei":[1,2,0]},{"q":"Secure configuration baselines harden the ___ against common attacks.","ht":"Yescrypt","diff":"Extreme","hh":"c8403903475c9fea73ac7aa495f3980090d89371f2311182775789a901a4b782","pw":true,"ef":["54","44","40","43","5f","5e"],"ei":[4,0,1,3,5,2]},{"q":"The risk register tracks ___ identified risks.","ht":"Yescrypt","diff":"Extreme","hh":"bb2806853abc7ac5780e347c5b359bfc2a261899d7e18089e427e08e42bfcea2","pw":true,"ef":["02","07","05","04","0e"],"ei":[2,4,0,3,1]},{"q":"The malware used ___ obfuscation to evade signature detection.","ht":"Balloon Hashing","diff":"Extreme","hh":"6c1c2135f8ee2c41950ad58d12b85b078aa36e5cf004968dfb6ffbe27d489294","pw":true,"ef":["51","52","42","44"],"ei":[0,3,1,2]},{"q":"The security architecture review addressed ___ design principles.","ht":"Balloon Hashing","diff":"Extreme","hh":"e45f9cd1906a061751fa94345626c890a3785cb883b3662aae2b2c53a171b555","pw":true,"ef":["03","04","01","02","04"],"ei":[4,1,3,2,0]},{"q":"Security governance ensures accountability for ___ risk management.","ht":"Balloon Hashing","diff":"Extreme","hh":"6aeeb247e084178f1629d48fcfa9464168b7b184e71149d406e30b9286ac4053","pw":true,"ef":["58","45","42","50","53","59"],"ei":[2,1,3,0,5,4]},{"q":"The penetration test report had ___ pages of findings.","ht":"Balloon Hashing","diff":"Extreme","hh":"0cd7579eb5fcaa70acd30f3f4e8f5032436793daeedf5a2f4c6170cbd06de950","pw":true,"ef":["02","0f","02","03","05"],"ei":[4,1,3,0,2]},{"q":"The ___ tool automates the discovery of security misconfigurations.","ht":"Balloon Hashing","diff":"Extreme","hh":"2ebbf23389f2021a1343d84d85a08f9fc30ab2bfbfa5f50b8e99c36d0bccaac6","pw":true,"ef":["52","5f","43","5e","59","4d"],"ei":[1,5,4,3,2,0]},{"q":"The security awareness training takes ___ minutes to complete.","ht":"Balloon Hashing","diff":"Extreme","hh":"9f2a35399c4c5d21bb98d08fdc1a48bcbb80527dcdb71f70b7199d7b6edfc597","pw":true,"ef":["04","02","04","00","01"],"ei":[1,2,0,3,4]},{"q":"Threat intelligence platforms aggregate indicators of ___ compromise.","ht":"Balloon Hashing","diff":"Extreme","hh":"08e91c0fa7296211a688a4ed559f9f48153b8f0a508bfd17b2f474ed50504d51","pw":true,"ef":["56","59","5e","45","53"],"ei":[1,0,3,4,2]},{"q":"The threat intelligence feed provides ___ indicators of compromise.","ht":"Balloon Hashing","diff":"Extreme","hh":"7df919e028ec852d903cf3b2359a13246b4af7aca317b5d7c9044adf3ee8d726","pw":true,"ef":["0e","00","03","0e","01"],"ei":[4,1,0,3,2]},{"q":"The security roadmap prioritizes implementation of ___ controls.","ht":"Balloon Hashing","diff":"Extreme","hh":"9ac8afab7d8a19dffd5eae975a7201474fd1981c8827a01a87cbc3ff56901bb6","pw":true,"ef":["43","45","52","58","56","42","46"],"ei":[4,6,0,5,3,2,1]},{"q":"The security incident involved ___ stolen credentials.","ht":"Balloon Hashing","diff":"Extreme","hh":"3426a148570f52b0772d5fd2975968c3898eadc87048e0497cd9ff2a58db0ba4","pw":true,"ef":["07","01","00","0f","0f"],"ei":[2,3,4,0,1]},{"q":"Continuous ___ monitoring detects anomalies in user behavior.","ht":"Lyra2","diff":"Extreme","hh":"b9e3e926ba23dece5fc5fbdae94146ed0dbd58009560aca302b97ebc5d999cb6","pw":true,"ef":["45","5e","52","56","53","59","5a","5e"],"ei":[2,5,1,6,4,7,0,3]},{"q":"The vulnerability disclosure program received ___ submissions.","ht":"Lyra2","diff":"Extreme","hh":"7bc11d735b0011d09f1366fa183d9f9778b1b6fac3b9f6c95153475f848cbe5a","pw":true,"ef":["04","0e","06","02","05"],"ei":[0,3,4,2,1]},{"q":"The ___ standard provides guidelines for secure software development.","ht":"Lyra2","diff":"Extreme","hh":"6d24604b6b46894543a64c4d77c2d510470b5a8ea5bc2e193cf70ab90397cb58","pw":true,"ef":["5e","47","54","43","45","58"],"ei":[4,3,5,0,1,2]},{"q":"The security tool deployment covers ___ percent of endpoints.","ht":"Lyra2","diff":"Extreme","hh":"51a7bc28d0ec6033eac371a402a7aa3752e774ef6b327b90c0d9dbf517f74535","pw":true,"ef":["00","01","00","04","03"],"ei":[3,2,4,0,1]},{"q":"Penetration testers used a custom ___ to exploit the deserialization flaw.","ht":"Lyra2","diff":"Extreme","hh":"defae9a07e73b3449e20e7a65dbba23947f0ca9eb4c0aca867664012efc5a3f9","pw":true,"ef":["54","45","43","56","5e","54"],"ei":[2,1,3,0,4,5]},{"q":"The encryption standard requires a minimum key size of ___ bits.","ht":"Lyra2","diff":"Extreme","hh":"645e34008a526e22dd284a8f12c6308f4b0e4a37060d3246fb2ff3a196afb808","pw":true,"ef":["01","03","02","02","05"],"ei":[3,2,1,4,0]},{"q":"The security team conducted tabletop exercises for ___ incident response.","ht":"Lyra2","diff":"Extreme","hh":"fa1a4dab62c4351a710123d909479cac6ba6edcb22c7ed9f193c58814c83b0cc","pw":true,"ef":["58","42","45","45","56","56"],"ei":[3,1,4,2,5,0]},{"q":"The security assessment scope includes ___ applications.","ht":"Lyra2","diff":"Extreme","hh":"6978418f07719d3aa27e700cec085154939da200f57baa7c7f56af8c0461a177","pw":true,"ef":["02","00","03","04","00"],"ei":[4,3,0,2,1]},{"q":"Encryption key rotation is essential for maintaining ___ security.","ht":"Lyra2","diff":"Extreme","hh":"0fbaabe69f79262fd1569c8ec1498ea385ed8ca26dfad25768fcd932136a75a0","pw":true,"ef":["5e","52","54","44","47","52","5b"],"ei":[3,0,1,5,4,6,2]},{"q":"The incident response drill simulated ___ attack scenarios.","ht":"Lyra2","diff":"Extreme","hh":"6ce677683fbed95bdbf9031b2627018c8db9fbc262906f03d20322c574718180","pw":true,"ef":["01","01","04","07","01"],"ei":[4,3,0,1,2]},{"q":"The ___ analysis identified the root cause of the data breach.","ht":"Catena","diff":"Extreme","hh":"5ef4f5ecee5a26180287451cb1e7f007da947cc9dc97082937757e22996c3075","pw":true,"ef":["5b","52","44","54","5e","43","44","58"],"ei":[2,7,3,6,5,4,0,1]},{"q":"The security baseline hardening guide has ___ recommendations.","ht":"Catena","diff":"Extreme","hh":"c2c473862782e04e4cbd5a08f2814b8f375454224414419a876db87bedc1fa7c","pw":true,"ef":["0f","03","0e","0e","01"],"ei":[3,0,1,2,4]},{"q":"Zero-knowledge proofs enable verification without revealing the ___.","ht":"Catena","diff":"Extreme","hh":"0d501f10688fa915772d8388f06c4476a4e5e09c64f57689cf90da278fd52476","pw":true,"ef":["5e","4f","52","46","59","42","58"],"ei":[3,6,0,1,4,2,5]},{"q":"The network monitoring captured ___ suspicious connections.","ht":"Catena","diff":"Extreme","hh":"6832dd732fa016690d8ab8073abc87111f2c6bca083b79aeba38b790ff5324b1","pw":true,"ef":["06","02","07","02","02"],"ei":[0,1,3,4,2]},{"q":"The security policy mandates background checks for ___ administrators.","ht":"Catena","diff":"Extreme","hh":"142ca67f3aa874866fc31351f531f05a6bbf3a305921109a4ee50f8d1e3753c4","pw":true,"ef":["59","45","5a","55","42","56","52","47"],"ei":[2,6,4,5,3,7,1,0]},{"q":"The security governance committee meets ___ times per year.","ht":"Catena","diff":"Extreme","hh":"82c15a88cfaa169aa6ecbcb89b17b9a516a9dc23fbf683f8cb811101e1b73ef2","pw":true,"ef":["00","03","03","04","03"],"ei":[3,2,1,4,0]},{"q":"The ___ framework helps organizations measure cybersecurity maturity.","ht":"Catena","diff":"Extreme","hh":"da4fd9625d914fdbfd40645d1bca76d1b6ba9ae4583072d7191ec8f0f3b0bb34","pw":true,"ef":["42","56","55","45","5a"],"ei":[0,4,2,3,1]},{"q":"The data protection policy covers ___ data processing activities.","ht":"Catena","diff":"Extreme","hh":"9f2be4f7a65a15afe38696ee99be47612187474f2dde67356514e60ed9a67b27","pw":true,"ef":["0e","06","02","0e","07"],"ei":[1,3,0,4,2]},{"q":"Advanced analytics detect subtle patterns of ___ data exfiltration.","ht":"Catena","diff":"Extreme","hh":"622d67865a7db491337d1343de040aaad07e600a7bf9bbd423087672b06c1da3","pw":true,"ef":["45","56","54","58","59","58"],"ei":[2,5,0,1,4,3]},{"q":"The malware analysis report documented ___ behavioral indicators.","ht":"Catena","diff":"Extreme","hh":"cfff70439d8c1684524eadb40c86bc089f0170b53e5fea87f64a3fcc195ef8f3","pw":true,"ef":["00","03","05","02","06"],"ei":[4,2,1,3,0]}]')
 
-    filled = current_sentence.replace("-", str(current_correct))
-    current_hash = hash_sentence(filled, current_algo)
+# Color scheme
+BG_DARK = "#1a1a2e"
+BG_PANEL = "#16213e"
+BG_INPUT = "#0f3460"
+FG_GREEN = "#00ff41"
+FG_CYAN = "#00d4ff"
+FG_YELLOW = "#ffd700"
+FG_RED = "#ff4444"
+FG_WHITE = "#e0e0e0"
+FG_DIM = "#666688"
+ACCENT = "#533483"
 
-    masked = current_sentence.replace("-", "_____")
+DIFFICULTY_COLORS = {
+    "Beginner": "#00ff41",
+    "Easy": "#00d4ff",
+    "Medium": "#ffd700",
+    "Hard": "#ff8c00",
+    "Expert": "#ff4444",
+    "Extreme": "#ff0000",
+}
 
-    algo_label.config(text=f"Hash Algorithm: {current_algo}")
-    hash_label.config(text=f"{current_hash}")
-    sentence_label.config(text=masked)
-    result_label.config(text="")
-    result_label.config(fg="#cccccc")
-    entry.delete(0, tk.END)
-    entry.focus_set()
+PASSWORD_INFO = {
+    "PBKDF2-HMAC-SHA256": "Salt: hashgame_pbkdf2_salt_v1 | Iter=1 | SHA-256",
+    "bcrypt": "Salt: $2b$04$8HbRM5KlkUvOrBGBisdlQ. | Cost=4",
+    "scrypt": "Salt: hashgame_scrypt_salt_v1 | N=2, r=1, p=1",
+    "Argon2d": "Salt: hashgame_argon_salt_v1 | t=1, m=64KB, p=1",
+    "Argon2i": "Salt: hashgame_argon_salt_v1 | t=1, m=64KB, p=1",
+    "Argon2id": "Salt: hashgame_argon_salt_v1 | t=1, m=64KB, p=1",
+    "Yescrypt": "Salt: hashgame_yescrypt_salt | PBKDF2-SHA512 iter=1",
+    "Balloon Hashing": "Salt: hashgame_balloon_salt | 3 rounds",
+    "Lyra2": "Salt: hashgame_lyra2_salt_v1 | 4 rounds",
+    "Catena": "Salt: hashgame_catena_salt_v1 | 5 rounds",
+}
 
 
-def check():
-    global score, total_rounds
-    user = entry.get().strip()
-    if not user:
-        result_label.config(text="Enter a number to crack the hash!", fg="#ffaa00")
-        return
+class HashGameGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("HashGame - Educational Hash Trainer | Cysec Don")
+        self.root.geometry("900x750")
+        self.root.configure(bg=BG_DARK)
+        self.root.resizable(True, True)
 
-    total_rounds += 1
-    mode = random.choice(["check", "check", "ignore", "chaos"])
+        self.current_q = 0
+        self.score = 0
+        self.skips = 0
+        self.total = len(GAME_DATA)
 
-    if mode == "check":
-        if user == str(current_correct):
-            score += 1
-            result_label.config(
-                text=f"200 OK - CORRECT! Answer: {current_correct}",
-                fg="#00ff88"
-            )
+        self._build_ui()
+        self._show_question()
+
+    def _build_ui(self):
+        # Top banner
+        banner = tk.Frame(self.root, bg=ACCENT, height=60)
+        banner.pack(fill=tk.X)
+        banner.pack_propagate(False)
+
+        tk.Label(banner, text="⚡ HASHEGAME ⚡", font=("Courier", 20, "bold"),
+                 bg=ACCENT, fg=FG_GREEN).pack(pady=5)
+        tk.Label(banner, text="by Cysec Don | cysecdon@gmail.com",
+                 font=("Courier", 9), bg=ACCENT, fg=FG_CYAN).pack()
+
+        # Info panel
+        info_frame = tk.Frame(self.root, bg=BG_PANEL, bd=1, relief=tk.RIDGE)
+        info_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+
+        self.q_label = tk.Label(info_frame, text="", font=("Courier", 12, "bold"),
+                                bg=BG_PANEL, fg=FG_CYAN, anchor='w')
+        self.q_label.pack(fill=tk.X, padx=10, pady=5)
+
+        meta_frame = tk.Frame(info_frame, bg=BG_PANEL)
+        meta_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+
+        self.hash_type_label = tk.Label(meta_frame, text="", font=("Courier", 11, "bold"),
+                                        bg=BG_PANEL, fg=FG_GREEN)
+        self.hash_type_label.pack(side=tk.LEFT, padx=(0, 20))
+
+        self.diff_label = tk.Label(meta_frame, text="", font=("Courier", 11, "bold"),
+                                   bg=BG_PANEL, fg=FG_YELLOW)
+        self.diff_label.pack(side=tk.LEFT, padx=(0, 20))
+
+        self.score_label = tk.Label(meta_frame, text="Score: 0", font=("Courier", 11, "bold"),
+                                    bg=BG_PANEL, fg=FG_CYAN)
+        self.score_label.pack(side=tk.RIGHT)
+
+        # Password hash info
+        self.pw_info_label = tk.Label(info_frame, text="", font=("Courier", 9),
+                                      bg=BG_PANEL, fg=FG_DIM)
+        self.pw_info_label.pack(fill=tk.X, padx=10, pady=(0, 5))
+
+        # Question text
+        q_frame = tk.Frame(self.root, bg=BG_DARK)
+        q_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        tk.Label(q_frame, text="QUESTION:", font=("Courier", 10, "bold"),
+                 bg=BG_DARK, fg=FG_DIM).pack(anchor='w')
+
+        self.question_text = tk.Label(q_frame, text="", font=("Courier", 12),
+                                      bg=BG_DARK, fg=FG_GREEN, wraplength=860,
+                                      justify=tk.LEFT, anchor='w')
+        self.question_text.pack(fill=tk.X, pady=5)
+
+        # Hash display
+        hash_frame = tk.Frame(self.root, bg=BG_PANEL, bd=1, relief=tk.RIDGE)
+        hash_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        tk.Label(hash_frame, text="HASH:", font=("Courier", 10, "bold"),
+                 bg=BG_PANEL, fg=FG_DIM).pack(anchor='w', padx=10, pady=(5,0))
+
+        self.hash_text = scrolledtext.ScrolledText(hash_frame, height=4, font=("Courier", 10),
+                                                   bg=BG_DARK, fg=FG_YELLOW, bd=0,
+                                                   wrap=tk.WORD, state=tk.DISABLED)
+        self.hash_text.pack(fill=tk.X, padx=10, pady=5)
+
+        # Answer input
+        input_frame = tk.Frame(self.root, bg=BG_DARK)
+        input_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        tk.Label(input_frame, text="YOUR ANSWER:", font=("Courier", 10, "bold"),
+                 bg=BG_DARK, fg=FG_DIM).pack(anchor='w')
+
+        input_row = tk.Frame(input_frame, bg=BG_DARK)
+        input_row.pack(fill=tk.X, pady=5)
+
+        self.answer_entry = tk.Entry(input_row, font=("Courier", 14), bg=BG_INPUT,
+                                     fg=FG_GREEN, insertbackground=FG_GREEN, bd=2)
+        self.answer_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        self.answer_entry.bind('<Return>', lambda e: self._submit_answer())
+
+        tk.Button(input_row, text="SUBMIT", font=("Courier", 11, "bold"),
+                  bg="#006400", fg=FG_GREEN, activebackground="#008000",
+                  command=self._submit_answer, width=10).pack(side=tk.LEFT, padx=2)
+        tk.Button(input_row, text="HINT", font=("Courier", 11, "bold"),
+                  bg="#4a4a00", fg=FG_YELLOW, activebackground="#666600",
+                  command=self._show_hint, width=8).pack(side=tk.LEFT, padx=2)
+        tk.Button(input_row, text="SKIP", font=("Courier", 11, "bold"),
+                  bg="#4a0000", fg=FG_RED, activebackground="#660000",
+                  command=self._skip_question, width=8).pack(side=tk.LEFT, padx=2)
+        tk.Button(input_row, text="QUIT", font=("Courier", 11, "bold"),
+                  bg="#330000", fg="#888888", activebackground="#440000",
+                  command=self._quit_game, width=8).pack(side=tk.LEFT, padx=2)
+
+        # Progress bar
+        progress_frame = tk.Frame(self.root, bg=BG_DARK)
+        progress_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.progress_canvas = tk.Canvas(progress_frame, height=25, bg=BG_PANEL,
+                                         highlightthickness=0)
+        self.progress_canvas.pack(fill=tk.X)
+
+        # Status bar
+        self.status_label = tk.Label(self.root, text="Welcome to HashGame!",
+                                     font=("Courier", 10), bg=BG_DARK, fg=FG_DIM)
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+
+        # Credits button
+        tk.Button(self.root, text="ℹ Credits", font=("Courier", 9),
+                  bg=BG_DARK, fg=FG_DIM, bd=0, command=self._show_credits).place(
+                      rely=1.0, x=10, y=-25, anchor='sw')
+
+    def _update_progress(self):
+        self.progress_canvas.delete("all")
+        w = self.progress_canvas.winfo_width()
+        h = 25
+        if w < 2:
+            w = 860
+        pct = self.current_q / self.total
+        bar_w = int(w * pct)
+
+        self.progress_canvas.create_rectangle(0, 0, w, h, fill=BG_PANEL, outline="")
+        if bar_w > 0:
+            self.progress_canvas.create_rectangle(0, 0, bar_w, h, fill="#006400", outline="")
+        self.progress_canvas.create_text(w // 2, h // 2,
+            text=f"{self.current_q}/{self.total} ({pct*100:.1f}%) | Score: {self.score} | Skips: {self.skips}",
+            fill=FG_GREEN, font=("Courier", 9, "bold"))
+
+    def _show_question(self):
+        if self.current_q >= self.total:
+            self._show_results()
+            return
+
+        item = GAME_DATA[self.current_q]
+        self.q_label.config(text=f"Question {self.current_q + 1} of {self.total}")
+
+        ht = item["ht"]
+        diff = item["diff"]
+        diff_color = DIFFICULTY_COLORS.get(diff, FG_WHITE)
+
+        self.hash_type_label.config(text=f"Hash: {ht}")
+        self.diff_label.config(text=f"[{diff}]", fg=diff_color)
+        self.score_label.config(text=f"Score: {self.score}")
+        self.question_text.config(text=item["q"])
+
+        if item["pw"]:
+            info = PASSWORD_INFO.get(ht, "")
+            self.pw_info_label.config(text=f"Parameters: {info}")
         else:
-            result_label.config(
-                text="400 Bad Request - Hash mismatch! Try another number.",
-                fg="#ff4444"
-            )
+            self.pw_info_label.config(text="")
 
-    elif mode == "ignore":
-        code = random.choice(status_codes)
-        result_label.config(
-            text=f"{code} - Ambiguous server response. Trust the hash!",
-            fg="#ffaa00"
+        self.hash_text.config(state=tk.NORMAL)
+        self.hash_text.delete("1.0", tk.END)
+        hash_display = item["hh"]
+        if len(hash_display) > 200:
+            hash_display = hash_display[:200] + "..."
+        self.hash_text.insert(tk.END, hash_display)
+        self.hash_text.config(state=tk.DISABLED)
+
+        self.answer_entry.delete(0, tk.END)
+        self.answer_entry.focus_set()
+        self.status_label.config(text="Type your answer and press Enter or Submit", fg=FG_DIM)
+        self._update_progress()
+
+    def _submit_answer(self):
+        answer = self.answer_entry.get().strip()
+        if not answer:
+            self.status_label.config(text="Please enter an answer!", fg=FG_RED)
+            return
+
+        item = GAME_DATA[self.current_q]
+        if check_answer(answer, item["ht"], item["hh"]):
+            self.score += 1
+            self.status_label.config(text="✓ CORRECT! Well done!", fg=FG_GREEN)
+            self._next_question()
+        else:
+            self.status_label.config(text="✗ Incorrect. Try again or skip.", fg=FG_RED)
+            self.answer_entry.delete(0, tk.END)
+            self.answer_entry.focus_set()
+
+    def _show_hint(self):
+        item = GAME_DATA[self.current_q]
+        real_answer = xor_decrypt(item)
+        length = len(real_answer)
+        if real_answer.isdigit():
+            hint_text = f"Hint: The answer is a {length}-digit number."
+        else:
+            first = real_answer[0]
+            last = real_answer[-1]
+            hint_text = f"Hint: {length} characters, starts with '{first}', ends with '{last}'."
+        self.status_label.config(text=hint_text, fg=FG_YELLOW)
+
+    def _skip_question(self):
+        item = GAME_DATA[self.current_q]
+        real_answer = xor_decrypt(item)
+        self.skips += 1
+        self.status_label.config(text=f"Skipped! Answer: {real_answer}", fg=FG_YELLOW)
+        self.root.after(1500, self._next_question)
+
+    def _next_question(self):
+        self.current_q += 1
+        self._show_question()
+
+    def _quit_game(self):
+        if messagebox.askyesno("Quit", "Are you sure you want to quit?"):
+            self._show_results()
+
+    def _show_results(self):
+        answered = self.current_q
+        pct = (self.score / self.total * 100) if self.total > 0 else 0
+
+        result_text = (
+            f"\n╔══════════════════════════════════════╗\n"
+            f"║         FINAL RESULTS                ║\n"
+            f"╠══════════════════════════════════════╣\n"
+            f"║                                      \n"
+            f"║  Questions: {answered}/{self.total}                  \n"
+            f"║  Correct:   {self.score}                       \n"
+            f"║  Skipped:   {self.skips}                       \n"
+            f"║  Accuracy:  {pct:.1f}%                    \n"
+            f"║                                      \n"
+            f"║  by Cysec Don                        \n"
+            f"║  cysecdon@gmail.com                  \n"
+            f"║                                      \n"
+            f"╚══════════════════════════════════════╝"
         )
+        messagebox.showinfo("Game Over", result_text)
+        self.root.destroy()
 
-    else:
-        code = random.choice(status_codes)
-        noise = user * random.randint(1, 3)
-        result_label.config(
-            text=f"{code} | Payload: {noise}",
-            fg="#ff6600"
+    def _show_credits(self):
+        credits = (
+            "HASHGAME - Educational Hash Trainer\n\n"
+            "Created by: Cysec Don\n"
+            "Email: cysecdon@gmail.com\n\n"
+            "An educational cybersecurity tool designed\n"
+            "to teach students about hashing algorithms\n"
+            "through hands-on brute-force practice.\n\n"
+            "Features:\n"
+            "• 500 unique questions\n"
+            "• 50 hash types\n"
+            "• 6 difficulty levels\n"
+            "• Interactive GUI"
         )
-
-    score_label.config(text=f"Score: {score}/{total_rounds}")
-
-
-def show_hint():
-    hint_window = tk.Toplevel(root)
-    hint_window.title("Hint - Hash Cracker Challenge")
-    hint_window.geometry("480x280")
-    hint_window.configure(bg="#1a1a2e")
-    hint_window.resizable(False, False)
-
-    tk.Label(
-        hint_window,
-        text="HINT",
-        font=("Consolas", 16, "bold"),
-        fg="#00ff88", bg="#1a1a2e"
-    ).pack(pady=(15, 10))
-
-    hint_text = (
-        "Each question has a UNIQUE number answer!\n\n"
-        "Write a Python script that hashes the sentence\n"
-        "with different numbers and compares the result\n"
-        "to the target hash.\n\n"
-        "Example:\n"
-        "import hashlib\n"
-        "for i in range(1, 10000):\n"
-        "    h = hashlib.md5(\n"
-        "        f'I just paid {i} naira for coffee.'.encode()\n"
-        "    ).hexdigest()\n"
-        "    if h == TARGET: print(f'Found: {i}')"
-    )
-    tk.Label(
-        hint_window,
-        text=hint_text,
-        font=("Consolas", 9),
-        fg="#cccccc", bg="#1a1a2e",
-        justify="left"
-    ).pack(pady=(0, 15))
+        messagebox.showinfo("Credits", credits)
 
 
-def show_credits():
-    cred_window = tk.Toplevel(root)
-    cred_window.title("Credits - Hash Cracker Challenge")
-    cred_window.geometry("400x180")
-    cred_window.configure(bg="#1a1a2e")
-    cred_window.resizable(False, False)
+def main():
+    root = tk.Tk()
+    app = HashGameGUI(root)
+    root.mainloop()
 
-    tk.Label(
-        cred_window,
-        text="CREDITS",
-        font=("Consolas", 16, "bold"),
-        fg="#00ff88", bg="#1a1a2e"
-    ).pack(pady=(15, 10))
-
-    tk.Label(
-        cred_window,
-        text="Designed & Created by:",
-        font=("Consolas", 10),
-        fg="#888888", bg="#1a1a2e"
-    ).pack(pady=(5, 2))
-
-    tk.Label(
-        cred_window,
-        text="Cysec Don",
-        font=("Consolas", 14, "bold"),
-        fg="#00ccff", bg="#1a1a2e"
-    ).pack(pady=(0, 5))
-
-    tk.Label(
-        cred_window,
-        text="cysecdon@gmail.com",
-        font=("Consolas", 10),
-        fg="#ffaa00", bg="#1a1a2e"
-    ).pack(pady=(0, 10))
-
-
-# ═══════════════════════════════════════════════════════════════
-#   GUI SETUP
-# ═══════════════════════════════════════════════════════════════
-
-root = tk.Tk()
-root.title("Hash Cracker Challenge - Designed by Cysec Don")
-root.geometry("700x560")
-root.configure(bg="#0f0f23")
-root.resizable(False, False)
-
-# --- Title bar ---
-title_frame = tk.Frame(root, bg="#16213e")
-title_frame.pack(fill="x")
-tk.Label(
-    title_frame,
-    text="HASH CRACKER CHALLENGE",
-    font=("Consolas", 18, "bold"),
-    fg="#00ff88", bg="#16213e"
-).pack(pady=(12, 2))
-tk.Label(
-    title_frame,
-    text="Designed by Cysec Don",
-    font=("Consolas", 10, "bold"),
-    fg="#00ccff", bg="#16213e"
-).pack(pady=(0, 1))
-tk.Label(
-    title_frame,
-    text="cysecdon@gmail.com",
-    font=("Consolas", 9),
-    fg="#ffaa00", bg="#16213e"
-).pack(pady=(0, 10))
-
-# --- Score ---
-score_label = tk.Label(
-    root, text="Score: 0/0",
-    font=("Consolas", 12, "bold"),
-    fg="#00ff88", bg="#0f0f23"
-)
-score_label.pack(pady=(12, 8))
-
-# --- Algorithm display ---
-algo_label = tk.Label(
-    root, text="",
-    font=("Consolas", 12, "bold"),
-    fg="#00ccff", bg="#0f0f23"
-)
-algo_label.pack(pady=4)
-
-# --- Hash display ---
-hash_frame = tk.Frame(root, bg="#1a1a2e", bd=2, relief="groove")
-hash_frame.pack(padx=40, pady=6, fill="x")
-tk.Label(
-    hash_frame,
-    text="Target Hash:",
-    font=("Consolas", 9),
-    fg="#888888", bg="#1a1a2e"
-).pack(anchor="w", padx=8, pady=(6, 0))
-hash_label = tk.Label(
-    hash_frame,
-    text="",
-    font=("Consolas", 10),
-    fg="#ffffff", bg="#1a1a2e",
-    wraplength=600, justify="left"
-)
-hash_label.pack(anchor="w", padx=8, pady=(2, 8))
-
-# --- Sentence display ---
-tk.Label(
-    root, text="Crack this sentence:",
-    font=("Consolas", 9),
-    fg="#888888", bg="#0f0f23"
-).pack(pady=(10, 2))
-sentence_label = tk.Label(
-    root, text="",
-    font=("Consolas", 15, "bold"),
-    fg="#ffffff", bg="#0f0f23"
-)
-sentence_label.pack(pady=4)
-
-# --- Input ---
-input_frame = tk.Frame(root, bg="#0f0f23")
-input_frame.pack(pady=10)
-entry = tk.Entry(
-    input_frame,
-    font=("Consolas", 14),
-    width=20,
-    bg="#1a1a2e", fg="#ffffff",
-    insertbackground="#00ff88",
-    bd=2, relief="groove"
-)
-entry.pack(side="left", padx=4)
-entry.bind("<Return>", lambda e: check())
-
-tk.Button(
-    input_frame, text="SUBMIT",
-    font=("Consolas", 11, "bold"),
-    bg="#00ff88", fg="#0f0f23",
-    activebackground="#00cc66",
-    bd=0, padx=15, pady=4,
-    command=check
-).pack(side="left", padx=4)
-
-# --- Result display ---
-result_label = tk.Label(
-    root, text="",
-    font=("Consolas", 12),
-    fg="#cccccc", bg="#0f0f23"
-)
-result_label.pack(pady=8)
-
-# --- Buttons row ---
-btn_frame = tk.Frame(root, bg="#0f0f23")
-btn_frame.pack(pady=8)
-
-tk.Button(
-    btn_frame, text="NEXT ROUND",
-    font=("Consolas", 10, "bold"),
-    bg="#16213e", fg="#00ccff",
-    activebackground="#1a3a5c",
-    bd=0, padx=12, pady=4,
-    command=new_round
-).pack(side="left", padx=6)
-
-tk.Button(
-    btn_frame, text="HINT",
-    font=("Consolas", 10, "bold"),
-    bg="#16213e", fg="#ffaa00",
-    activebackground="#1a3a5c",
-    bd=0, padx=12, pady=4,
-    command=show_hint
-).pack(side="left", padx=6)
-
-tk.Button(
-    btn_frame, text="CREDITS",
-    font=("Consolas", 10, "bold"),
-    bg="#16213e", fg="#ff44ff",
-    activebackground="#1a3a5c",
-    bd=0, padx=12, pady=4,
-    command=show_credits
-).pack(side="left", padx=6)
-
-# --- Footer ---
-footer_frame = tk.Frame(root, bg="#0f0f23")
-footer_frame.pack(side="bottom", pady=8)
-tk.Label(
-    footer_frame,
-    text="Designed by Cysec Don",
-    font=("Consolas", 8),
-    fg="#555555", bg="#0f0f23"
-).pack()
-tk.Label(
-    footer_frame,
-    text="cysecdon@gmail.com | Learn Hashing Through Play",
-    font=("Consolas", 8),
-    fg="#555555", bg="#0f0f23"
-).pack()
-
-# --- Start first round ---
-new_round()
-root.mainloop()
+if __name__ == "__main__":
+    main()

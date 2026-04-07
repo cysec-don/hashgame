@@ -1,0 +1,50 @@
+MD4
+MD5
+SHA-0
+SHA-1
+RIPEMD-128
+HAVAL-128
+Tiger-128
+Snefru-128
+GOST (old versions)
+NTLM
+RIPEMD-160
+HAVAL-160
+Tiger-160
+SHA-224
+Whirlpool 
+Adler-32 
+CRC16
+CRC32
+Jenkins hash
+FNV-1
+SHA-256 
+SHA-384
+SHA-512
+SHA-512/224
+SHA-512/256
+SHA3-224
+SHA3-256 
+SHA3-384
+SHA3-512
+BLAKE2s
+BLAKE2b
+BLAKE3 
+Skein-256
+Skein-512
+Keccak-256 (SHA-3 base)
+KangarooTwelve
+ParallelHash
+Haraka
+Streebog-256
+Streebog-512
+PBKDF2
+bcrypt
+scrypt
+Argon2d
+Argon2i
+Argon2id 
+Yescrypt
+Balloon Hashing
+Lyra2
+Catena
